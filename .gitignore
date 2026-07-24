@@ -1,0 +1,8 @@
+node_modules/
+build/
+.plasmo/
+docker-config/
+*.xpi
+Dockerfile.firefox
+policies.json
+serve-xpi.sh
