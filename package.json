@@ -1,31 +1,12 @@
 {
-  "name": "chatgpt-usage-poc",
-  "displayName": "ChatGPT Usage POC",
-  "version": "0.0.1",
-  "description": "POC: capture ChatGPT backend-api response bodies to find a real usage/limit signal",
-  "author": "poc",
+  "name": "ai-cloud-tracker",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "plasmo dev",
-    "build": "plasmo build"
-  },
-  "dependencies": {
-    "plasmo": "0.90.5",
-    "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "build": "pnpm -r --filter=./packages/* build",
+    "compile": "pnpm -r --filter=./packages/* compile"
   },
   "devDependencies": {
-    "@types/chrome": "0.0.270",
-    "@types/react": "18.2.48",
-    "@types/react-dom": "18.2.18",
-    "typescript": "5.4.5"
-  },
-  "manifest": {
-    "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-    "permissions": ["scripting", "storage"],
-    "browser_specific_settings": {
-      "gecko": {
-        "id": "chatgpt-usage-poc@local.test"
-      }
-    }
+    "typescript": "5.7.3"
   }
 }

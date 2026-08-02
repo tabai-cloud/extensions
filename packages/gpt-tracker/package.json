@@ -1,0 +1,20 @@
+{
+  "name": "gpt-tracker",
+  "displayName": "ChatGPT Usage Tracker",
+  "version": "0.1.0",
+  "description": "Reports ChatGPT message counts (per model) and best-effort usage-limit signals to this workload's own operator. No UI.",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "compile": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-cloud-tracker/shared": "workspace:*",
+    "wxt": "0.21.3"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.0.270",
+    "typescript": "5.7.3"
+  }
+}
