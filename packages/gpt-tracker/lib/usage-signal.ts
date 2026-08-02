@@ -32,6 +32,14 @@ interface LimitsProgressEntry {
 export function samplesFromUsagePayload(payload: UsagePayload, now: number): MetricSample[] {
   const samples: MetricSample[] = []
 
+  // Always emitted, independent of whether anything below actually parses —
+  // this is what makes a wrong field-shape guess debuggable instead of
+  // invisible. Without it, a broken parser and "user hasn't hit any limits
+  // yet" look identical from Convex: both show message counts with no
+  // chatgpt.usage.* samples. With it, signal_seen incrementing while
+  // *_remaining stays absent is a visible, checkable discrepancy.
+  samples.push({ metric: "chatgpt.usage.signal_seen", value: 1, sampledAt: now })
+
   const entries = Array.isArray(payload.limitsProgress) ? (payload.limitsProgress as LimitsProgressEntry[]) : []
   for (const entry of entries) {
     if (typeof entry.feature === "string" && typeof entry.remaining === "number") {

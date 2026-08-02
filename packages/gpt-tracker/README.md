@@ -30,7 +30,11 @@ so this package needs the same content-script technique that POC used:
   through the background on purpose: the background is what holds the
   operator's local secret and makes the authenticated report call, and
   `chrome.runtime.sendMessage` reliably wakes a dormant MV3 service worker
-  to receive it.
+  to receive it — but that call can still reject if the worker is torn down
+  mid-flight (a race, not the common case), and a rejected `message-sent`
+  is a permanently lost message count: there's no queue or retry on this
+  path, unlike claude-tracker's `webRequest` listener, which runs in the
+  background directly and has no such relay hop to lose a message on.
 - `entrypoints/background.ts` receives relayed messages, increments
   per-model counters and reports usage samples via
   `@ai-cloud-tracker/shared`, and re-reports the last-known usage payload

@@ -15,6 +15,12 @@
 // centralized in one place, the same as claude-tracker's design.
 export default defineContentScript({
   matches: ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+  // Must match gpt-signal.content.ts's document_start: that MAIN-world script
+  // starts posting messages the instant its fetch hook installs, and this
+  // listener has to already be registered by then — at the default
+  // document_idle, every signal fired before idle is dropped silently (no
+  // queue, no error) since window.postMessage has no listener yet.
+  runAt: "document_start",
   main() {
     const RELAY_SOURCE = "gpt-tracker"
 
