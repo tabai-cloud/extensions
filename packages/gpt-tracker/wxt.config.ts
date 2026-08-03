@@ -35,6 +35,14 @@ export default defineConfig({
     // package's own public/schema.json for chrome.storage.managed.
     storage: {
       managed_schema: "schema.json"
+    },
+    // See claude-tracker/wxt.config.ts's identical comment — TabAi Cloud's
+    // own product icon, same resized set.
+    icons: {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   }
 })

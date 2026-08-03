@@ -37,6 +37,18 @@ export default defineConfig({
     // (CRX-delivered) extensions no longer have.
     storage: {
       managed_schema: "schema.json"
+    },
+    // TabAi Cloud's own product icon (sourced from ai-cloud-v2's
+    // public/tabai-icon-512.png, resized to the standard extension sizes)
+    // — this extension has no action/popup, so the only places this is
+    // ever seen are chrome://extensions and the extensions-menu
+    // puzzle-piece dropdown, but a generic default icon there would be an
+    // odd inconsistency next to the "TabAi Cloud" name.
+    icons: {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   }
 })
