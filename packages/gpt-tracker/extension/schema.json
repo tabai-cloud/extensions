@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "localSecret": { "type": "string" },
+    "operatorApiBaseUrl": { "type": "string" },
+    "workloadName": { "type": "string" }
+  }
+}

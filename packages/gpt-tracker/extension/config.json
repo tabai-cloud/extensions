@@ -1,3 +1,0 @@
-{
-  "_comment": "Placeholder only. ai-cloud-operator's install-tracker-extension init container overwrites this file with the real per-workload localSecret/operatorApiBaseUrl/workloadName after scripts/install.sh unpacks this bundle. Loaded unpacked with no operator around (e.g. manual/dev testing), @ai-cloud-tracker/shared's loadConfig treats these empty fields as 'not configured yet' and returns null — never throws."
-}
