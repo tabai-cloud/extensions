@@ -1,26 +1,34 @@
 # ai-cloud-tracker
 
-A pnpm monorepo of UI-less browser extensions that watch an AI chat site's
-own network traffic and report usage telemetry (message counts per model,
+A pnpm monorepo of usage-telemetry code — mostly UI-less browser
+extensions, plus one mitmproxy sidecar addon — that watches an AI chat
+site's own traffic and reports usage telemetry (message counts per model,
 usage-limit signals) to that workload's own [ai-cloud-operator](https://github.com/gojnimer-labs/ai-cloud-operator)
 — never Convex directly, never a popup, never an options page.
 
 ## Packages
 
-- [`packages/claude-tracker`](./packages/claude-tracker) — watches
-  claude.ai. Pure background service worker: claude.ai exposes a direct
-  `GET /usage` endpoint, so no content scripts are needed.
+- [`packages/claude-tracker`](./packages/claude-tracker) — a claude.ai-watching
+  background service worker. Its own message-send detection and usage
+  heartbeat have been removed in favor of `claude-mitm` (see that package's
+  README for why — short version: it can observe claude.ai's webapp traffic
+  fine, but not Anthropic's official "Claude for Chrome" sidebar extension,
+  which `chrome.webRequest` structurally cannot see across extensions). Kept
+  around for a planned, unrelated in-page UI-overlay feature.
+- [`packages/claude-mitm`](./packages/claude-mitm) — a mitmproxy addon run
+  as a sidecar in the same pod, now the single source of truth for Claude
+  usage tracking (both claude.ai's webapp and Claude for Chrome's sidebar).
 - [`packages/gpt-tracker`](./packages/gpt-tracker) — watches chatgpt.com.
   Needs content scripts (MAIN-world `fetch` wrapping + an ISOLATED-world
   relay) since chatgpt.com has no equivalent direct usage endpoint — see
   that package's own README for why it looks structurally different from
   `claude-tracker`, and for a known gap in how well-verified its
-  usage-signal parsing is.
+  usage-signal parsing is. Not yet covered by a `-mitm` equivalent.
 - [`packages/shared`](./packages/shared) — `@ai-cloud-tracker/shared`:
-  config bootstrap (`config.json`, written by the operator's
-  install-tracker-extension init container) and reporting
-  (`POST /workloads/{name}/extension/report`), identical between both
-  extensions and shared verbatim rather than duplicated.
+  config bootstrap and reporting (`POST /workloads/{name}/extension/report`),
+  shared verbatim between the browser-extension packages (`claude-mitm` is
+  plain Python, so it reimplements the same tiny reporting contract itself
+  rather than importing this).
 
 ## How a workload gets one of these
 

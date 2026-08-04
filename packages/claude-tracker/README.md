@@ -18,9 +18,16 @@ package and its `gpt-tracker` sibling both use
 - `chrome.webRequest.onBeforeRequest` (non-blocking, `requestBody` only —
   no `webRequestBlocking` permission) matches Claude's own message-send
   endpoints (`.../chat_conversations/*/completion` and
-  `.../retry_completion`). This is the "a message was sent" + "which model"
-  signal, extracted straight from the org ID in the URL and the `model`
-  field in the request body.
+  `.../retry_completion`), plus `api.anthropic.com/v1/messages` — the
+  public Messages API endpoint the official Claude for Chrome sidebar
+  extension (`fcoeoabgfenejglbffodgkkbkcdhcgfn`) sends through instead,
+  confirmed via a `chrome://net-export` capture of a real sidebar send
+  (see `entrypoints/background.ts`'s own comment on `MESSAGE_SEND_URL_
+  PATTERNS`). This is the "a message was sent" + "which model" signal,
+  extracted from the `model` field in the request body, plus (for the two
+  claude.ai endpoints only) the org ID in the URL — the Messages API
+  endpoint carries no org ID, so that case falls back to the same org-ID
+  discovery the heartbeat below uses.
 - Right after each detected send, `lib/claude-api.ts#fetchUsage` calls
   `GET https://claude.ai/api/organizations/{orgId}/usage` directly — a
   plain, credentialed `fetch()`, no manual cookie handling required.

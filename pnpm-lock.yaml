@@ -14,9 +14,6 @@ importers:
 
   packages/claude-tracker:
     dependencies:
-      '@ai-cloud-tracker/shared':
-        specifier: workspace:*
-        version: link:../shared
       wxt:
         specifier: 0.21.3
         version: 0.21.3(rolldown@1.2.1)(typescript@5.7.3)(vite@8.2.0(jiti@2.7.0))
