@@ -1,21 +1,22 @@
-"""claude-mitm — a mitmproxy addon that reports Claude usage (message counts
-per model, usage-limit percentages) to this workload's own ai-cloud-operator,
-the same metrics claude-tracker's browser extension already reports.
+"""claude-mitm — a mitmproxy addon that reports Claude message counts (per
+model) to this workload's own ai-cloud-operator, the same metric
+claude-tracker's browser extension already reported.
 
-Why this exists alongside (and now instead of) claude-tracker's own
-chrome.webRequest-based detection: Chrome's webRequest API does not let one
-extension observe network requests initiated from ANOTHER extension's own
-privileged context (background service worker, side panel, popup) — only
-requests happening in a real tab/page are visible cross-extension. Anthropic's
-own "Claude for Chrome" sidebar extension sends messages via
-api.anthropic.com/v1/messages entirely from its own side panel's JS context,
-so claude-tracker could never see it no matter what URL pattern it registered
-— confirmed empirically with a diagnostic webRequest listener that saw zero
-requests to api.anthropic.com while a chrome://net-export capture of the same
-session showed the sidebar's traffic clearly happening. A TLS-intercepting
-proxy sits below the extension permission model entirely, so it sees both
-claude.ai's own webapp traffic AND the sidebar's, uniformly — see this
-package's own README for the full investigation.
+Why this exists alongside (and now instead of, for message-send detection)
+claude-tracker's own chrome.webRequest-based detection: Chrome's webRequest
+API does not let one extension observe network requests initiated from
+ANOTHER extension's own privileged context (background service worker, side
+panel, popup) — only requests happening in a real tab/page are visible
+cross-extension. Anthropic's own "Claude for Chrome" sidebar extension sends
+messages via api.anthropic.com/v1/messages entirely from its own side
+panel's JS context, so claude-tracker could never see it no matter what URL
+pattern it registered — confirmed empirically with a diagnostic webRequest
+listener that saw zero requests to api.anthropic.com while a
+chrome://net-export capture of the same session showed the sidebar's
+traffic clearly happening. A TLS-intercepting proxy sits below the
+extension permission model entirely, so it sees both claude.ai's own webapp
+traffic AND the sidebar's, uniformly — see this package's own README for
+the full investigation.
 
 --allow-hosts (set by whoever launches mitmdump with this addon, see
 ai-cloud-operator's internal/catalog/tracker.go) should be scoped to
@@ -30,23 +31,28 @@ having technical access to full plaintext (that's the whole point of the
 proxy), this addon's privacy posture is meant to match claude-tracker's own:
 counts and percentages only, never content.
 
-Usage-limit percentages are reported two ways: passively, off whatever
-/usage responses the browser happens to make on its own (response(), cheap
-and immediate when it happens), and actively, via a background heartbeat
-thread (_heartbeat_loop) that polls /usage itself every
-HEARTBEAT_INTERVAL_SECONDS using a session cookie + orgId opportunistically
-captured off any claude.ai request. The active half is not optional
-redundancy — confirmed live, 2026-08-04, on a real workload where 3 real
-messages went in and out over ~15 minutes without the browser organically
-calling /usage even once, so passive-only observation reported zero
-claude.usage.* samples the entire session. claude-tracker's old
-chrome.alarms-based heartbeat guaranteed a cadence the way passive
-observation alone never could; this is that guarantee's replacement.
+Usage-limit percentages are reported passively here — off whatever /usage
+responses the browser happens to make on its own (response(), cheap and
+immediate when it happens) — but NOT actively polled from this process.
+That was tried (an earlier version of this file ran its own background
+heartbeat thread hitting /usage directly via urllib) and reverted: claude.ai
+sits behind Cloudflare bot detection, and a script-originated request from
+this sidecar's own process — not a real browser tab, different network
+origin, different TLS fingerprint — got flagged even after replaying a
+captured session cookie AND a real User-Agent/Referer (confirmed live,
+2026-08-04: HTTP 403). A genuine `fetch()` from inside the browser itself
+sails through for free, with the right origin/fingerprint/headers by
+construction, and doesn't have to fight an arms race we don't control
+either side of. So the guaranteed-cadence usage heartbeat lives back in
+claude-tracker's own chrome.alarms — see that package's background.ts —
+since it's a general, account-level, non-sidebar-specific metric, there's
+no coverage gap left by keeping it there: claude-tracker's extension is
+force-installed unconditionally whenever claude-mitm is (see tracker.go),
+so it's always present to do this half of the job.
 """
 
 import json
 import os
-import re
 import threading
 import time
 import urllib.error
@@ -64,21 +70,6 @@ LOCAL_SECRET = os.environ.get("EXTENSION_LOCAL_SECRET", "")
 WEBAPP_COMPLETION_SUFFIXES = ("/completion", "/retry_completion")
 MESSAGES_API_PATH = "/v1/messages"
 USAGE_PATH_SUFFIX = "/usage"
-
-# Matches the org ID out of any .../organizations/{orgId}/... claude.ai path
-# — used to discover an orgId to actively poll (see _heartbeat_loop) without
-# waiting for a /completion request to reveal one.
-ORG_ID_PATTERN = re.compile(r"/organizations/([^/]+)/")
-
-# 15 minutes — matches claude-tracker's own old HEARTBEAT_PERIOD_MINUTES
-# (background.ts, before its tracking role moved here). Passively observing
-# /usage responses the browser happens to make on its own (see response()
-# below) is not enough on its own: confirmed live, 2026-08-04, on a real
-# workload where 3 real messages went in and out over ~15 minutes without
-# the browser ever organically calling /usage even once, so zero
-# claude.usage.* samples ever got reported — a real regression against the
-# extension's old guaranteed-cadence heartbeat, not a rare edge case.
-HEARTBEAT_INTERVAL_SECONDS = 15 * 60
 
 MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
 SCOPED_MODEL_KEY = {"sonnet": "weeklySonnet", "opus": "weeklyOpus", "fable": "weeklyFable"}
@@ -101,64 +92,6 @@ _message_counts = {}
 # flow.id -> requested model, recorded in request() and consumed in
 # response() once we know how the /v1/messages stream actually ended.
 _pending_sidebar_sends = {}
-
-# Session state opportunistically captured off ANY authenticated claude.ai
-# request (see _capture_session_state), used by the active heartbeat below
-# to poll /usage itself rather than waiting for the browser to happen to
-# call it. Deliberately just the latest values, not a history — same
-# reasoning claude-tracker's own lastKnownOrgId used: a fresh value is
-# always recoverable from the very next request, so there's nothing worth
-# persisting past this process's own lifetime.
-_session_state_lock = threading.Lock()
-_last_known_org_id = None
-_last_known_cookie = None
-
-
-def _capture_session_state(request):
-    global _last_known_org_id, _last_known_cookie
-    cookie = request.headers.get("Cookie")
-    if not cookie:
-        return
-    match = ORG_ID_PATTERN.search(request.path)
-    with _session_state_lock:
-        _last_known_cookie = cookie
-        if match:
-            _last_known_org_id = match.group(1)
-
-
-def _active_usage_poll():
-    """Actively polls /usage itself, from this process, independent of
-    whatever the browser happens to be doing — the guaranteed-cadence
-    counterpart to response()'s passive observation below. Needs a
-    previously-captured orgId + session cookie (see _capture_session_state);
-    silently no-ops on a heartbeat tick where neither client has made any
-    claude.ai request yet this process's lifetime — the next tick tries
-    again, same self-healing shape every other best-effort report in this
-    file already has.
-    """
-    with _session_state_lock:
-        org_id, cookie = _last_known_org_id, _last_known_cookie
-    if not org_id or not cookie:
-        return
-    req = urllib.request.Request(
-        f"https://claude.ai/api/organizations/{org_id}/usage",
-        headers={"Cookie": cookie},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            body = resp.read()
-    except urllib.error.URLError:
-        return
-    _parse_and_report_usage(body)
-
-
-def _heartbeat_loop():
-    while True:
-        time.sleep(HEARTBEAT_INTERVAL_SECONDS)
-        try:
-            _active_usage_poll()
-        except Exception:
-            pass  # never let a heartbeat-tick error kill the whole loop
 
 
 def _report_samples(samples):
@@ -273,17 +206,9 @@ def _terminal_stop_reason(response):
 
 
 def request(flow: http.HTTPFlow) -> None:
-    host = flow.request.host
-
-    # Unconditional (not gated on method/POST below) and deliberately before
-    # the early return — any claude.ai request, GET or POST, might be the
-    # first one this process has ever seen, and the active heartbeat needs
-    # this captured well before its own first 15-minute tick fires.
-    if host == "claude.ai":
-        _capture_session_state(flow.request)
-
     if flow.request.method != "POST":
         return
+    host = flow.request.host
     url = flow.request.pretty_url
 
     if host == "claude.ai" and url.endswith(WEBAPP_COMPLETION_SUFFIXES):
@@ -318,11 +243,3 @@ def response(flow: http.HTTPFlow) -> None:
         return
     if _terminal_stop_reason(flow.response) == "end_turn":
         _record_message(model_version)
-
-
-# Started once, at module load — mitmdump imports this file exactly once
-# per process lifetime (unlike request()/response(), which mitmproxy calls
-# per-flow), so this is the right place for a background loop with no
-# equivalent hook of its own in the mitmproxy addon API. daemon=True so this
-# thread never blocks mitmdump's own process shutdown.
-threading.Thread(target=_heartbeat_loop, daemon=True).start()

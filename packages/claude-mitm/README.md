@@ -2,11 +2,13 @@
 
 A [mitmproxy](https://mitmproxy.org/) addon + committed CA keypair, run as a
 sidecar container in ai-cloud-operator's `chromium-tracker` workload pod,
-that reports Claude usage (message counts per model, usage-limit
-percentages) to that workload's own operator — the same job
-`claude-tracker`'s browser extension does, plus one thing the extension
-structurally cannot: usage from Anthropic's own official "Claude for Chrome"
-sidebar extension.
+that reports Claude message counts (per model) to that workload's own
+operator — the same job `claude-tracker`'s browser extension used to do,
+plus one thing the extension structurally cannot: message counts from
+Anthropic's own official "Claude for Chrome" sidebar extension. Usage-limit
+percentage reporting is split with `claude-tracker`: this addon reports it
+passively when it happens to observe it, but the guaranteed-cadence
+heartbeat lives in the extension — see "How it works" below for why.
 
 ## Why this exists
 
@@ -33,12 +35,12 @@ specifically because `webRequest` still can't *see* them, which the spec
 discussion itself calls an inconsistency.
 
 A TLS-intercepting proxy sits below the extension permission model
-entirely, so it sees both sources uniformly. Per team decision, this addon
-is now the single source of truth for Claude usage tracking — `claude-tracker`
-retains its manifest/permissions/shared config-loading infrastructure for a
-planned unrelated feature (in-page UI overlays), but its own message-send
-detection and heartbeat have been removed to avoid double-reporting the
-same metrics from two places.
+entirely, so it sees both sources uniformly. This addon is now the single
+source of truth for per-model message counts — `claude-tracker`'s own
+`chrome.webRequest`-based detection was removed to avoid double-reporting
+the same metric from two places. Usage-limit percentages ended up split
+differently (see below): the extension kept its heartbeat rather than this
+addon growing an equivalent active one.
 
 ## How it works
 
@@ -57,19 +59,28 @@ same metrics from two places.
   equivalent this API's shape has to "the user got a reply." This is a
   heuristic derived from one real capture, not a documented Anthropic
   contract — expect to revisit if the sidebar's internal protocol changes.
-- **Usage percentages**: reported two ways. Passively, whenever claude.ai or
-  the sidebar happens to call `GET https://claude.ai/api/organizations/
-  {orgId}/usage` on their own — cheap, immediate when it happens. And
-  actively: a background heartbeat thread polls that same endpoint itself
-  every 15 minutes (matching `claude-tracker`'s old `chrome.alarms` cadence),
-  using a session cookie + orgId opportunistically captured off any observed
-  claude.ai request. The active half isn't optional redundancy — confirmed
-  live, 2026-08-04, on a real workload where 3 real messages went in and out
-  over ~15 minutes without the browser ever organically calling `/usage`,
-  so passive-only observation reported zero `claude.usage.*` samples the
-  entire session. Parsing (either path) mirrors `claude-tracker`'s own
-  `lib/claude-api.ts#parseUsage` (the `limits` array shape, with the older
-  `five_hour`/`seven_day`/etc. top-level-field shape as fallback).
+- **Usage percentages**: reported passively only — whenever claude.ai or the
+  sidebar happens to call `GET https://claude.ai/api/organizations/{orgId}/
+  usage` on their own, this addon observes and reports the response. Parsing
+  mirrors `claude-tracker`'s own `lib/claude-api.ts#parseUsage` (the
+  `limits` array shape, with the older `five_hour`/`seven_day`/etc.
+  top-level-field shape as fallback). An earlier version of this addon also
+  ran its own active heartbeat — a background thread polling `/usage`
+  directly via `urllib`, using a session cookie + orgId opportunistically
+  captured off observed traffic, to guarantee a reporting cadence the way
+  passive observation alone can't (confirmed live, 2026-08-04: a real
+  workload where 3 real messages went in and out over ~15 minutes without
+  the browser ever organically calling `/usage`, so passive-only reported
+  zero `claude.usage.*` samples the entire session). That was reverted,
+  also confirmed live, 2026-08-04: claude.ai sits behind Cloudflare bot
+  detection, and the active poll got HTTP 403'd even after replaying a
+  captured session cookie AND a real User-Agent/Referer — a script-
+  originated request from this sidecar's own process has a different
+  network origin and TLS fingerprint than a real browser tab, and that's
+  not a gap headers alone can close. The guaranteed-cadence heartbeat lives
+  back in `claude-tracker`'s own `chrome.alarms` instead — see that
+  package's README — since a genuine in-browser `fetch()` doesn't have
+  this problem at all.
 - Reports via the exact same wire contract `@ai-cloud-tracker/shared`'s
   `reportSamples` already uses — `POST {operatorApiBaseUrl}/workloads/
   {workloadName}/extension/report`, `Authorization: Bearer {localSecret}`,

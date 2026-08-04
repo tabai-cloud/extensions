@@ -1,43 +1,48 @@
 # claude-tracker
 
-A UI-less browser extension that watches claude.ai's own network traffic and
-API responses to report message counts (per model) and usage limits (per
-preset) to this workload's own operator — no popup, no options page, no
-`chrome.storage` UI of any kind.
+A UI-less browser extension that reports Claude usage-limit percentages
+(session/weekly, per-model) to this workload's own operator — no popup, no
+options page, no `chrome.storage` UI of any kind.
 
 See the repo root README for the shared reporting architecture (this
-package and its `gpt-tracker` sibling both use
-`@ai-cloud-tracker/shared` for config bootstrap + operator reporting).
+package and its `gpt-tracker` sibling both use `@ai-cloud-tracker/shared`
+for config bootstrap + operator reporting), and `packages/claude-mitm`'s
+own README for where message-send detection (per-model counts) actually
+lives now — not here.
 
 ## How it works
 
 - `entrypoints/background.ts` is the whole extension: a background service
-  worker, no content scripts at all — unlike `gpt-tracker`, claude.ai
-  exposes a direct `GET /usage` endpoint, so there's no need to sniff
-  response bodies from a content script.
-- `chrome.webRequest.onBeforeRequest` (non-blocking, `requestBody` only —
-  no `webRequestBlocking` permission) matches Claude's own message-send
-  endpoints (`.../chat_conversations/*/completion` and
-  `.../retry_completion`), plus `api.anthropic.com/v1/messages` — the
-  public Messages API endpoint the official Claude for Chrome sidebar
-  extension (`fcoeoabgfenejglbffodgkkbkcdhcgfn`) sends through instead,
-  confirmed via a `chrome://net-export` capture of a real sidebar send
-  (see `entrypoints/background.ts`'s own comment on `MESSAGE_SEND_URL_
-  PATTERNS`). This is the "a message was sent" + "which model" signal,
-  extracted from the `model` field in the request body, plus (for the two
-  claude.ai endpoints only) the org ID in the URL — the Messages API
-  endpoint carries no org ID, so that case falls back to the same org-ID
-  discovery the heartbeat below uses.
-- Right after each detected send, `lib/claude-api.ts#fetchUsage` calls
-  `GET https://claude.ai/api/organizations/{orgId}/usage` directly — a
-  plain, credentialed `fetch()`, no manual cookie handling required.
-  Response shape parsing (`lib/claude-api.ts#parseUsage`) is ported from
+  worker, no content scripts, no `chrome.webRequest` listener. It used to
+  also detect message sends (matching claude.ai's completion endpoints);
+  that moved to `packages/claude-mitm`, a mitmproxy sidecar that can see
+  Anthropic's official "Claude for Chrome" sidebar extension's traffic too
+  — something `chrome.webRequest` structurally cannot, since one extension
+  can't observe network requests initiated from another extension's own
+  privileged context (confirmed empirically — see `claude-mitm`'s README
+  for the full investigation).
+- What's left here is purely the usage-limit heartbeat: `chrome.alarms`
+  fires every 15 minutes, `lib/claude-api.ts#fetchUsage` calls
+  `GET https://claude.ai/api/organizations/{orgId}/usage` (a plain,
+  credentialed `fetch()`, browser session cookies attached automatically —
+  no manual cookie handling). Response shape parsing
+  (`lib/claude-api.ts#parseUsage`) is ported from
   [lugia19/Claude-Usage-Extension](https://github.com/lugia19/Claude-Usage-Extension)'s
   `shared/dataclasses.js`.
-- `chrome.alarms` runs a periodic heartbeat (every 15 minutes) so usage
-  still gets reported during idle browsing.
 - `chrome.cookies.get({name: 'lastActiveOrg', ...})` is the org-ID-discovery
-  fallback for the heartbeat path.
+  fallback for the heartbeat.
+- **Why the heartbeat stays here instead of also moving to `claude-mitm`**:
+  tried and reverted. `claude-mitm` briefly had its own active heartbeat
+  (polling `/usage` directly from the sidecar's own process), but claude.ai
+  sits behind Cloudflare bot detection, and a script-originated request —
+  different network origin, different TLS fingerprint than a real browser
+  tab — got blocked (HTTP 403) even replaying a captured session cookie and
+  a real User-Agent. A genuine `fetch()` from inside this extension's own
+  background worker doesn't have that problem: it IS the real browser
+  request. Since `claude-mitm` is only ever deployed alongside this
+  extension, never instead of it (see `ai-cloud-operator`'s
+  `internal/catalog/tracker.go`), keeping the heartbeat here leaves no
+  coverage gap.
 
 ## Install (manual/dev)
 

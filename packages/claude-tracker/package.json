@@ -1,8 +1,8 @@
 {
   "name": "claude-tracker",
   "displayName": "TabAi Cloud",
-  "version": "0.3.0",
-  "description": "Force-installed via ai-cloud-operator policy. Usage tracking moved to packages/claude-mitm; this package is the starting point for a planned in-page UI-overlay feature. No UI yet.",
+  "version": "0.4.0",
+  "description": "Reports Claude.ai usage-limit percentages (message counts moved to packages/claude-mitm) to this workload's own operator. No UI.",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -10,6 +10,7 @@
     "compile": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-cloud-tracker/shared": "workspace:*",
     "wxt": "0.21.3"
   },
   "devDependencies": {
