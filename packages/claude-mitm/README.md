@@ -57,13 +57,19 @@ same metrics from two places.
   equivalent this API's shape has to "the user got a reply." This is a
   heuristic derived from one real capture, not a documented Anthropic
   contract — expect to revisit if the sidebar's internal protocol changes.
-- **Usage percentages**: both claude.ai and the sidebar independently call
-  `GET https://claude.ai/api/organizations/{orgId}/usage` on their own
-  fairly regularly (confirmed via capture) — this addon passively observes
-  and reports those responses rather than actively polling itself. Parsing
-  mirrors `claude-tracker`'s own `lib/claude-api.ts#parseUsage` (the
-  `limits` array shape, with the older `five_hour`/`seven_day`/etc.
-  top-level-field shape as fallback).
+- **Usage percentages**: reported two ways. Passively, whenever claude.ai or
+  the sidebar happens to call `GET https://claude.ai/api/organizations/
+  {orgId}/usage` on their own — cheap, immediate when it happens. And
+  actively: a background heartbeat thread polls that same endpoint itself
+  every 15 minutes (matching `claude-tracker`'s old `chrome.alarms` cadence),
+  using a session cookie + orgId opportunistically captured off any observed
+  claude.ai request. The active half isn't optional redundancy — confirmed
+  live, 2026-08-04, on a real workload where 3 real messages went in and out
+  over ~15 minutes without the browser ever organically calling `/usage`,
+  so passive-only observation reported zero `claude.usage.*` samples the
+  entire session. Parsing (either path) mirrors `claude-tracker`'s own
+  `lib/claude-api.ts#parseUsage` (the `limits` array shape, with the older
+  `five_hour`/`seven_day`/etc. top-level-field shape as fallback).
 - Reports via the exact same wire contract `@ai-cloud-tracker/shared`'s
   `reportSamples` already uses — `POST {operatorApiBaseUrl}/workloads/
   {workloadName}/extension/report`, `Authorization: Bearer {localSecret}`,

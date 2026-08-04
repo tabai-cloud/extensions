@@ -29,10 +29,24 @@ system prompts, message text, tool inputs/outputs, or response text. Despite
 having technical access to full plaintext (that's the whole point of the
 proxy), this addon's privacy posture is meant to match claude-tracker's own:
 counts and percentages only, never content.
+
+Usage-limit percentages are reported two ways: passively, off whatever
+/usage responses the browser happens to make on its own (response(), cheap
+and immediate when it happens), and actively, via a background heartbeat
+thread (_heartbeat_loop) that polls /usage itself every
+HEARTBEAT_INTERVAL_SECONDS using a session cookie + orgId opportunistically
+captured off any claude.ai request. The active half is not optional
+redundancy — confirmed live, 2026-08-04, on a real workload where 3 real
+messages went in and out over ~15 minutes without the browser organically
+calling /usage even once, so passive-only observation reported zero
+claude.usage.* samples the entire session. claude-tracker's old
+chrome.alarms-based heartbeat guaranteed a cadence the way passive
+observation alone never could; this is that guarantee's replacement.
 """
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -50,6 +64,21 @@ LOCAL_SECRET = os.environ.get("EXTENSION_LOCAL_SECRET", "")
 WEBAPP_COMPLETION_SUFFIXES = ("/completion", "/retry_completion")
 MESSAGES_API_PATH = "/v1/messages"
 USAGE_PATH_SUFFIX = "/usage"
+
+# Matches the org ID out of any .../organizations/{orgId}/... claude.ai path
+# — used to discover an orgId to actively poll (see _heartbeat_loop) without
+# waiting for a /completion request to reveal one.
+ORG_ID_PATTERN = re.compile(r"/organizations/([^/]+)/")
+
+# 15 minutes — matches claude-tracker's own old HEARTBEAT_PERIOD_MINUTES
+# (background.ts, before its tracking role moved here). Passively observing
+# /usage responses the browser happens to make on its own (see response()
+# below) is not enough on its own: confirmed live, 2026-08-04, on a real
+# workload where 3 real messages went in and out over ~15 minutes without
+# the browser ever organically calling /usage even once, so zero
+# claude.usage.* samples ever got reported — a real regression against the
+# extension's old guaranteed-cadence heartbeat, not a rare edge case.
+HEARTBEAT_INTERVAL_SECONDS = 15 * 60
 
 MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
 SCOPED_MODEL_KEY = {"sonnet": "weeklySonnet", "opus": "weeklyOpus", "fable": "weeklyFable"}
@@ -72,6 +101,64 @@ _message_counts = {}
 # flow.id -> requested model, recorded in request() and consumed in
 # response() once we know how the /v1/messages stream actually ended.
 _pending_sidebar_sends = {}
+
+# Session state opportunistically captured off ANY authenticated claude.ai
+# request (see _capture_session_state), used by the active heartbeat below
+# to poll /usage itself rather than waiting for the browser to happen to
+# call it. Deliberately just the latest values, not a history — same
+# reasoning claude-tracker's own lastKnownOrgId used: a fresh value is
+# always recoverable from the very next request, so there's nothing worth
+# persisting past this process's own lifetime.
+_session_state_lock = threading.Lock()
+_last_known_org_id = None
+_last_known_cookie = None
+
+
+def _capture_session_state(request):
+    global _last_known_org_id, _last_known_cookie
+    cookie = request.headers.get("Cookie")
+    if not cookie:
+        return
+    match = ORG_ID_PATTERN.search(request.path)
+    with _session_state_lock:
+        _last_known_cookie = cookie
+        if match:
+            _last_known_org_id = match.group(1)
+
+
+def _active_usage_poll():
+    """Actively polls /usage itself, from this process, independent of
+    whatever the browser happens to be doing — the guaranteed-cadence
+    counterpart to response()'s passive observation below. Needs a
+    previously-captured orgId + session cookie (see _capture_session_state);
+    silently no-ops on a heartbeat tick where neither client has made any
+    claude.ai request yet this process's lifetime — the next tick tries
+    again, same self-healing shape every other best-effort report in this
+    file already has.
+    """
+    with _session_state_lock:
+        org_id, cookie = _last_known_org_id, _last_known_cookie
+    if not org_id or not cookie:
+        return
+    req = urllib.request.Request(
+        f"https://claude.ai/api/organizations/{org_id}/usage",
+        headers={"Cookie": cookie},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read()
+    except urllib.error.URLError:
+        return
+    _parse_and_report_usage(body)
+
+
+def _heartbeat_loop():
+    while True:
+        time.sleep(HEARTBEAT_INTERVAL_SECONDS)
+        try:
+            _active_usage_poll()
+        except Exception:
+            pass  # never let a heartbeat-tick error kill the whole loop
 
 
 def _report_samples(samples):
@@ -186,9 +273,17 @@ def _terminal_stop_reason(response):
 
 
 def request(flow: http.HTTPFlow) -> None:
+    host = flow.request.host
+
+    # Unconditional (not gated on method/POST below) and deliberately before
+    # the early return — any claude.ai request, GET or POST, might be the
+    # first one this process has ever seen, and the active heartbeat needs
+    # this captured well before its own first 15-minute tick fires.
+    if host == "claude.ai":
+        _capture_session_state(flow.request)
+
     if flow.request.method != "POST":
         return
-    host = flow.request.host
     url = flow.request.pretty_url
 
     if host == "claude.ai" and url.endswith(WEBAPP_COMPLETION_SUFFIXES):
@@ -223,3 +318,11 @@ def response(flow: http.HTTPFlow) -> None:
         return
     if _terminal_stop_reason(flow.response) == "end_turn":
         _record_message(model_version)
+
+
+# Started once, at module load — mitmdump imports this file exactly once
+# per process lifetime (unlike request()/response(), which mitmproxy calls
+# per-flow), so this is the right place for a background loop with no
+# equivalent hook of its own in the mitmproxy addon API. daemon=True so this
+# thread never blocks mitmdump's own process shutdown.
+threading.Thread(target=_heartbeat_loop, daemon=True).start()
