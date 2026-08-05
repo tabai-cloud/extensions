@@ -2,7 +2,7 @@
   "name": "claude-tracker",
   "displayName": "TabAi Cloud",
   "version": "0.4.0",
-  "description": "Reports Claude.ai usage-limit percentages (message counts moved to packages/claude-mitm) to this workload's own operator. No UI.",
+  "description": "Reports Claude.ai usage-limit percentages (message counts moved to gojnimer-labs/ai-cloud-agent) to this workload's own operator. No UI.",
   "type": "module",
   "scripts": {
     "dev": "wxt",

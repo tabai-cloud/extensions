@@ -75,11 +75,12 @@ export function parseUsage(raw: RawUsageResponse): UsageLimits {
 // bypassing normal cross-origin CORS restrictions. Confirmed against
 // lugia19/Claude-Usage-Extension's own ContainerStrategy.fetch default
 // (Chrome/Electron) path: a plain `fetch(url, options)`, no manual cookie
-// handling at all. This is exactly the browser-native request claude-mitm's
-// own active-heartbeat attempt (tried and reverted, see that package's own
-// addon.py doc comment) couldn't replicate from outside the browser: right
-// network origin, right TLS fingerprint, every header exactly what
-// Cloudflare's bot detection expects, for free.
+// handling at all. This is exactly the browser-native request
+// gojnimer-labs/ai-cloud-agent's own active-heartbeat attempt (tried and
+// reverted, see that repo's providers/claude.py doc comment) couldn't
+// replicate from outside the browser: right network origin, right TLS
+// fingerprint, every header exactly what Cloudflare's bot detection
+// expects, for free.
 export async function fetchUsage(orgId: string): Promise<UsageLimits | null> {
   try {
     const response = await fetch(`https://claude.ai/api/organizations/${orgId}/usage`, {
