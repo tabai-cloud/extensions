@@ -101,8 +101,17 @@ const LABEL_DONE = "Solicitado"
 const LABEL_ERROR = "Erro — tentar novamente"
 const LABEL_OWNED = "Acesso concedido"
 
+// Rest-state icons — 🔒 (can request access) and ✅ (already have it) — see
+// this file's own doc comment on ICON_CLASS/LABEL_CLASS below for how these
+// pair with each element's text label.
+const ICON_LOCKED = "🔒"
+const ICON_OWNED = "✅"
+
 const BUTTON_ATTR = "data-tabai-request-ownership"
 const BADGE_ATTR = "data-tabai-ownership-badge"
+const FORCED_LABEL_ATTR = "data-tabai-force-label"
+const ICON_CLASS = "tabai-icon"
+const LABEL_CLASS = "tabai-label"
 const STYLE_ELEMENT_ID = "tabai-ownership-styles"
 
 // A real stylesheet, not inline styles: an early version used
@@ -116,6 +125,16 @@ const STYLE_ELEMENT_ID = "tabai-ownership-styles"
 // claude.ai's own layered UI — cheap insurance even though piggybacking on
 // the "more options" trigger's own wrapper (see this file's top-of-file
 // doc comment) hasn't shown a real stacking bug so far.
+//
+// At rest, each element shows only its ICON_CLASS glyph (🔒/✅) — compact
+// enough to sit unobtrusively next to the real "more options" trigger it's
+// piggybacking on; hovering (or focusing, for keyboard users) swaps to the
+// LABEL_CLASS text instead, same full-text look this had before icons were
+// added. A button carrying FORCED_LABEL_ATTR (its pending/done/error click
+// states — see createRequestOwnershipButton) always shows its label
+// regardless of hover: those are short-lived, user-initiated status
+// messages the click itself already has the user's attention for, not a
+// rest state that needs to stay compact.
 //
 // Injected once per content-script lifetime, into the real page DOM
 // (content scripts share the page's DOM even in the isolated JS world), not
@@ -174,24 +193,83 @@ function ensureStylesInjected(): void {
         color: #6fdd8b;
       }
     }
+
+    [${BUTTON_ATTR}] .${LABEL_CLASS},
+    [${BADGE_ATTR}] .${LABEL_CLASS} {
+      display: none;
+    }
+    [${BUTTON_ATTR}]:hover .${ICON_CLASS},
+    [${BUTTON_ATTR}]:focus .${ICON_CLASS},
+    [${BADGE_ATTR}]:hover .${ICON_CLASS},
+    [${BADGE_ATTR}]:focus .${ICON_CLASS} {
+      display: none;
+    }
+    [${BUTTON_ATTR}]:hover .${LABEL_CLASS},
+    [${BUTTON_ATTR}]:focus .${LABEL_CLASS},
+    [${BADGE_ATTR}]:hover .${LABEL_CLASS},
+    [${BADGE_ATTR}]:focus .${LABEL_CLASS} {
+      display: inline;
+    }
+    [${BUTTON_ATTR}][${FORCED_LABEL_ATTR}] .${ICON_CLASS} {
+      display: none;
+    }
+    [${BUTTON_ATTR}][${FORCED_LABEL_ATTR}] .${LABEL_CLASS} {
+      display: inline;
+    }
   `
   document.head.append(style)
 }
 
-// createRequestOwnershipButton builds one plain-text `<button>` (per the
-// product decision behind this feature: text, not an icon, so its intent
-// reads on sight rather than needing a tooltip) wired to onRequest, with
-// its own inline pending/done/error state — no shared/global state, no
-// pre-check against Convex for whether this resourceId was already
-// requested (duplicate inserts are silently deduped server-side, see
+// buildIconLabel creates the two-span (icon + label) structure every
+// button/badge shares — see ensureStylesInjected's own doc comment for how
+// the hover/focus swap between them works.
+function buildIconLabel(icon: string, label: string): { icon: HTMLSpanElement; label: HTMLSpanElement } {
+  const iconEl = document.createElement("span")
+  iconEl.className = ICON_CLASS
+  iconEl.textContent = icon
+  iconEl.setAttribute("aria-hidden", "true")
+
+  const labelEl = document.createElement("span")
+  labelEl.className = LABEL_CLASS
+  labelEl.textContent = label
+
+  return { icon: iconEl, label: labelEl }
+}
+
+// setButtonState updates both the visible label text and the aria-label
+// (the button is icon-only at rest — see ensureStylesInjected — so
+// assistive tech needs the state spelled out even when hover/focus isn't
+// active) in one place, and toggles FORCED_LABEL_ATTR: idle is the only
+// state that collapses to just the rest icon on mouse-out; every other
+// state is short-lived, user-initiated feedback that stays as text
+// regardless of hover.
+function setButtonState(button: HTMLButtonElement, label: HTMLSpanElement, text: string, forceLabel: boolean): void {
+  label.textContent = text
+  button.setAttribute("aria-label", text)
+  if (forceLabel) {
+    button.setAttribute(FORCED_LABEL_ATTR, "1")
+  } else {
+    button.removeAttribute(FORCED_LABEL_ATTR)
+  }
+}
+
+// createRequestOwnershipButton builds one `<button>` — a lock icon at rest,
+// expanding to the "Solicitar acesso" text on hover/focus (see
+// ensureStylesInjected) — wired to onRequest, with its own inline
+// pending/done/error state. No shared/global state, no pre-check against
+// Convex for whether this resourceId was already requested (duplicate
+// inserts are silently deduped server-side, see
 // convex/integrationOwnershipRequests/mutations.ts#create, so an optimistic
 // per-click button is enough).
 export function createRequestOwnershipButton(resourceId: string, onRequest: RequestOwnershipHandler): HTMLButtonElement {
   ensureStylesInjected()
   const button = document.createElement("button")
   button.type = "button"
-  button.textContent = LABEL_IDLE
   button.setAttribute(BUTTON_ATTR, "1")
+
+  const { icon, label } = buildIconLabel(ICON_LOCKED, LABEL_IDLE)
+  button.append(icon, label)
+  setButtonState(button, label, LABEL_IDLE, false)
 
   button.addEventListener("click", (event) => {
     event.preventDefault()
@@ -199,14 +277,14 @@ export function createRequestOwnershipButton(resourceId: string, onRequest: Requ
     if (button.disabled) return
 
     button.disabled = true
-    button.textContent = LABEL_PENDING
+    setButtonState(button, label, LABEL_PENDING, true)
     onRequest(resourceId)
       .then((ok) => {
-        button.textContent = ok ? LABEL_DONE : LABEL_ERROR
+        setButtonState(button, label, ok ? LABEL_DONE : LABEL_ERROR, true)
         button.disabled = ok
       })
       .catch(() => {
-        button.textContent = LABEL_ERROR
+        setButtonState(button, label, LABEL_ERROR, true)
         button.disabled = false
       })
   })
@@ -215,15 +293,21 @@ export function createRequestOwnershipButton(resourceId: string, onRequest: Requ
 }
 
 // createOwnershipBadge marks a chat the user already has tracked access
-// to — see request-ownership.content.ts's ownedIds/reconcileOwnership for
-// how a row gets upgraded from the request button to this badge once an
-// admin approval (or the original auto-claim) is reflected in the next
+// to — a checkmark icon at rest, expanding to "Acesso concedido" on
+// hover/focus (see ensureStylesInjected). See
+// request-ownership.content.ts's ownedIds/reconcileOwnership for how a row
+// gets upgraded from the request button to this badge once an admin
+// approval (or the original auto-claim) is reflected in the next
 // ownership refresh.
 export function createOwnershipBadge(): HTMLSpanElement {
   ensureStylesInjected()
   const badge = document.createElement("span")
-  badge.textContent = LABEL_OWNED
   badge.setAttribute(BADGE_ATTR, "1")
+  badge.setAttribute("aria-label", LABEL_OWNED)
+
+  const { icon, label } = buildIconLabel(ICON_OWNED, LABEL_OWNED)
+  badge.append(icon, label)
+
   return badge
 }
 
