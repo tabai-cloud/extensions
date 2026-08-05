@@ -15,10 +15,17 @@
 //    the main-button's own href only if that ancestor isn't present. Either
 //    way, a row that yields no id (a non-chat `[data-row]`) is silently
 //    skipped — see findSidebarTargets. The "more options" trigger
-//    (`[data-row-action]`) is a direct sibling of the main-button, carrying
-//    its OWN `opacity-0 group-hover:opacity-100` classes — there's no
-//    separate wrapper div hiding it, so a button inserted next to it is
-//    NOT hidden at rest.
+//    (`[data-row-action]`) is a SEPARATE absolutely-positioned trailing
+//    `<div>` (own `opacity-0 group-hover:opacity-100`, overlaid on top of
+//    the row's right edge) — confirmed live: an element mounted next to it
+//    is invisible at rest, same root cause as the /chats wrapper below (an
+//    earlier version of this file mixed this row up with a different,
+//    non-chat `[data-row]` variant that genuinely has no wrapper, and
+//    wrongly generalized from that). So this surface mounts into the
+//    main-button's own flex row instead — the `<a data-row-main-button>`
+//    itself is `display: flex` (icon + title as its two existing
+//    children), so appending a third item there is normal flex layout,
+//    not absolute-position guesswork, same reasoning as /chats below.
 //  - the /chats full-list page: a real `<table data-cds="Table">` — each
 //    `<tr data-hoverable>` has a title cell containing an
 //    `<a href="/chat/{uuid}">` and a separate, zero-width actions cell
@@ -68,7 +75,12 @@ function chatIdFromRowKey(rowKey: string | null): string | null {
 // this file's own top-of-file doc comment — [data-row] also covers non-chat
 // rows) are left unmarked and unprocessed, not just skipped-once: a later
 // scan gets another chance at them, in case whatever made them
-// unresolvable this pass was transient (e.g. still mid-render).
+// unresolvable this pass was transient (e.g. still mid-render). Falls back
+// to the old before-the-more-options-trigger mount if mainButton isn't a
+// real element to append into (shouldn't happen — querySelector always
+// returns an Element or null, and the null case is already filtered above
+// — but keeps the fallback shape consistent with findChatsTableTargets'
+// own defensive one below).
 export function findSidebarTargets(root: ParentNode): OwnershipTarget[] {
   const targets: OwnershipTarget[] = []
   const rows = root.querySelectorAll<HTMLElement>(`[data-row]:not([${PROCESSED_ATTR}])`)
@@ -79,8 +91,14 @@ export function findSidebarTargets(root: ParentNode): OwnershipTarget[] {
     const resourceId = chatIdFromRowKey(rowKey) ?? resourceIdFromAnchor(mainButton)
     const moreOptionsButton = row.querySelector<HTMLElement>("[data-row-action]")
     if (!resourceId || !moreOptionsButton) continue
+
+    const mount =
+      mainButton instanceof HTMLElement
+        ? (element: HTMLElement) => mainButton.append(element)
+        : (element: HTMLElement) => moreOptionsButton.before(element)
+
     row.setAttribute(PROCESSED_ATTR, "1")
-    targets.push({ resourceId, mount: (element) => moreOptionsButton.before(element) })
+    targets.push({ resourceId, mount })
   }
   return targets
 }
