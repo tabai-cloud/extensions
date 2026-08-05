@@ -1,6 +1,6 @@
-import { loadConfig, reportSamples, requestOwnership } from "@ai-cloud-tracker/shared"
+import { listOwnership, loadConfig, reportSamples, requestOwnership } from "@ai-cloud-tracker/shared"
 import { fetchUsage } from "../lib/claude-api"
-import type { RequestOwnershipMessage } from "../lib/request-ownership-message"
+import type { ListOwnershipMessage, RequestOwnershipMessage } from "../lib/request-ownership-message"
 
 // This extension's own message-send detection (chrome.webRequest, matching
 // claude.ai's completion endpoints) was removed in favor of
@@ -97,23 +97,37 @@ export default defineBackground(() => {
   // actually enrolled.
   loadConfig().catch((err) => console.error("[claude-tracker] loadConfig error", err))
 
-  // The "Solicitar acesso" button's own backend call (see
-  // entrypoints/request-ownership.content.ts) runs here, in the background
+  // Both the "Solicitar acesso" button's own backend call and the
+  // "already have access" badge's ownership lookup (see
+  // entrypoints/request-ownership.content.ts) run here, in the background
   // worker, rather than as a direct fetch() from the content script itself —
-  // same reasoning as fetchUsage in lib/claude-api.ts: this operator call
-  // needs this extension's own host_permissions grant, not whatever CORS/CSP
+  // same reasoning as fetchUsage in lib/claude-api.ts: these operator calls
+  // need this extension's own host_permissions grant, not whatever CORS/CSP
   // policy claude.ai's own page happens to set for scripts running in its
   // DOM. sendResponse is called asynchronously, so this listener must return
   // true to keep the message channel open for it (the standard
   // chrome.runtime.onMessage contract).
-  chrome.runtime.onMessage.addListener((message: RequestOwnershipMessage, _sender, sendResponse) => {
-    if (message.type !== "requestOwnership") return undefined
-    requestOwnership(message.source, message.resourceType, message.resourceId)
-      .then((ok) => sendResponse({ ok }))
-      .catch((err) => {
-        console.error("[claude-tracker] requestOwnership message error", err)
-        sendResponse({ ok: false })
-      })
-    return true
-  })
+  chrome.runtime.onMessage.addListener(
+    (message: ListOwnershipMessage | RequestOwnershipMessage, _sender, sendResponse) => {
+      if (message.type === "requestOwnership") {
+        requestOwnership(message.source, message.resourceType, message.resourceId)
+          .then((ok) => sendResponse({ ok }))
+          .catch((err) => {
+            console.error("[claude-tracker] requestOwnership message error", err)
+            sendResponse({ ok: false })
+          })
+        return true
+      }
+      if (message.type === "listOwnership") {
+        listOwnership(message.source, message.resourceType)
+          .then((resourceIds) => sendResponse({ resourceIds }))
+          .catch((err) => {
+            console.error("[claude-tracker] listOwnership message error", err)
+            sendResponse({ resourceIds: null })
+          })
+        return true
+      }
+      return undefined
+    }
+  )
 })
