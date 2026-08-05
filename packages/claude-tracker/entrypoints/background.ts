@@ -1,5 +1,6 @@
-import { loadConfig, reportSamples } from "@ai-cloud-tracker/shared"
+import { loadConfig, reportSamples, requestOwnership } from "@ai-cloud-tracker/shared"
 import { fetchUsage } from "../lib/claude-api"
+import type { RequestOwnershipMessage } from "../lib/request-ownership-message"
 
 // This extension's own message-send detection (chrome.webRequest, matching
 // claude.ai's completion endpoints) was removed in favor of
@@ -95,4 +96,24 @@ export default defineBackground(() => {
   // for the first alarm tick to discover whether this workload was
   // actually enrolled.
   loadConfig().catch((err) => console.error("[claude-tracker] loadConfig error", err))
+
+  // The "Solicitar acesso" button's own backend call (see
+  // entrypoints/request-ownership.content.ts) runs here, in the background
+  // worker, rather than as a direct fetch() from the content script itself —
+  // same reasoning as fetchUsage in lib/claude-api.ts: this operator call
+  // needs this extension's own host_permissions grant, not whatever CORS/CSP
+  // policy claude.ai's own page happens to set for scripts running in its
+  // DOM. sendResponse is called asynchronously, so this listener must return
+  // true to keep the message channel open for it (the standard
+  // chrome.runtime.onMessage contract).
+  chrome.runtime.onMessage.addListener((message: RequestOwnershipMessage, _sender, sendResponse) => {
+    if (message.type !== "requestOwnership") return undefined
+    requestOwnership(message.source, message.resourceType, message.resourceId)
+      .then((ok) => sendResponse({ ok }))
+      .catch((err) => {
+        console.error("[claude-tracker] requestOwnership message error", err)
+        sendResponse({ ok: false })
+      })
+    return true
+  })
 })
