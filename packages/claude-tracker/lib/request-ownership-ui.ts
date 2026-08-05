@@ -14,21 +14,29 @@
 //    (see chatIdFromRowKey below for the "chat:" prefix), falling back to
 //    the main-button's own href only if that ancestor isn't present. Either
 //    way, a row that yields no id (a non-chat `[data-row]`) is silently
-//    skipped — see findSidebarTargets. The "more options" trigger is a
-//    sibling carrying `data-row-action`.
+//    skipped — see findSidebarTargets. The "more options" trigger
+//    (`[data-row-action]`) is a direct sibling of the main-button, carrying
+//    its OWN `opacity-0 group-hover:opacity-100` classes — there's no
+//    separate wrapper div hiding it, so a button inserted next to it is
+//    NOT hidden at rest.
 //  - the /chats full-list page: a real `<table data-cds="Table">` — each
 //    `<tr data-hoverable>` has a title cell containing an
-//    `<a href="/chat/{uuid}">` and a separate actions cell whose own
-//    hover-reveal wrapper holds a `<button aria-haspopup="menu">` trigger
-//    (no data-row-action attribute here, unlike the sidebar, and no
-//    data-row-key either — this surface's id comes from the href alone).
+//    `<a href="/chat/{uuid}">` and a separate, zero-width actions cell
+//    whose "more options" trigger (`button[aria-haspopup="menu"]`) sits
+//    inside its OWN wrapper `<div>` carrying `opacity-0
+//    group-hover/cdsrow:opacity-100` — unlike the sidebar, THIS is a real
+//    wrapper, and CSS opacity on a parent composites its entire subtree at
+//    that alpha with no way for a child to opt back out. An element
+//    inserted next to that trigger (findChatsTableTargets' old approach)
+//    is therefore invisible at rest, not just unstyled — confirmed live.
+//    So this surface mounts into the TITLE cell's own flex row instead
+//    (real layout width, never opacity-hidden), found by walking siblings
+//    from the title anchor rather than matching claude.ai's own
+//    Tailwind class names, which are far more liable to drift.
 //
-// Rather than hardcoding claude.ai's own Tailwind utility classes for the
-// hover-reveal wrapper (liable to drift out from under us on any claude.ai
-// styling change), both adapters below insert the new button as a sibling
-// of that surface's existing "more options" trigger — piggybacking on
-// whatever visibility/positioning wrapper already makes that button work,
-// since it demonstrably works today.
+// Both adapters return a `mount` callback (not a fixed insertion element)
+// so each surface's own DOM quirks stay fully self-contained here —
+// request-ownership.content.ts just calls target.mount(element).
 
 const PROCESSED_ATTR = "data-tabai-ownership-processed"
 const CHAT_HREF_PATTERN = /\/chat\/([^/?#]+)/
@@ -36,7 +44,7 @@ const ROW_KEY_CHAT_PREFIX = "chat:"
 
 export interface OwnershipTarget {
   resourceId: string
-  moreOptionsButton: HTMLElement
+  mount: (element: HTMLElement) => void
 }
 
 function resourceIdFromAnchor(anchor: Element | null): string | null {
@@ -72,13 +80,23 @@ export function findSidebarTargets(root: ParentNode): OwnershipTarget[] {
     const moreOptionsButton = row.querySelector<HTMLElement>("[data-row-action]")
     if (!resourceId || !moreOptionsButton) continue
     row.setAttribute(PROCESSED_ATTR, "1")
-    targets.push({ resourceId, moreOptionsButton })
+    targets.push({ resourceId, mount: (element) => moreOptionsButton.before(element) })
   }
   return targets
 }
 
 // findChatsTableTargets returns one OwnershipTarget per not-yet-processed
-// /chats table row found under root.
+// /chats table row found under root. titleFlexRow (the title cell's own
+// flex row — see this file's top-of-file doc comment) is found by walking
+// from the title anchor: its next sibling is a `<span class="contents">`
+// (a no-box wrapper — its children ARE the cell's real layout), whose
+// first child is the flex row itself, holding [icon+title, relative-time]
+// as its two existing items. Appending a third item there is normal flex
+// layout, not absolute-position guesswork. Falls back to the old
+// before-the-more-options-trigger mount if that structure isn't found
+// (an unexpected claude.ai markup change) — degrades to the pre-fix,
+// hover-only behavior rather than silently dropping the button/badge
+// entirely.
 export function findChatsTableTargets(root: ParentNode): OwnershipTarget[] {
   const targets: OwnershipTarget[] = []
   const rows = root.querySelectorAll<HTMLElement>(`table[data-cds="Table"] tr[data-hoverable]:not([${PROCESSED_ATTR}])`)
@@ -87,8 +105,15 @@ export function findChatsTableTargets(root: ParentNode): OwnershipTarget[] {
     const resourceId = resourceIdFromAnchor(anchor)
     const moreOptionsButton = row.querySelector<HTMLElement>('button[aria-haspopup="menu"]')
     if (!resourceId || !moreOptionsButton) continue
+
+    const titleFlexRow = anchor?.nextElementSibling?.firstElementChild
+    const mount =
+      titleFlexRow instanceof HTMLElement
+        ? (element: HTMLElement) => titleFlexRow.append(element)
+        : (element: HTMLElement) => moreOptionsButton.before(element)
+
     row.setAttribute(PROCESSED_ATTR, "1")
-    targets.push({ resourceId, moreOptionsButton })
+    targets.push({ resourceId, mount })
   }
   return targets
 }
@@ -127,10 +152,19 @@ const STYLE_ELEMENT_ID = "tabai-ownership-styles"
 // doc comment) hasn't shown a real stacking bug so far.
 //
 // At rest, each element shows only its ICON_CLASS glyph (🔒/✅) — compact
-// enough to sit unobtrusively next to the real "more options" trigger it's
-// piggybacking on; hovering (or focusing, for keyboard users) swaps to the
-// LABEL_CLASS text instead, same full-text look this had before icons were
-// added. A button carrying FORCED_LABEL_ATTR (its pending/done/error click
+// enough to sit unobtrusively wherever it's mounted (see
+// findSidebarTargets/findChatsTableTargets); hovering the ROW — not just
+// the icon itself, which is a small target — swaps to the LABEL_CLASS text
+// instead, same full-text look this had before icons were added. The
+// trigger is [data-row]:hover / tr[data-hoverable]:hover (claude.ai's own
+// two row selectors — see this file's top-of-file doc comment), which,
+// like any CSS :hover on an ancestor, is already true whenever the pointer
+// is over ANY descendant, not just that exact element — an earlier version
+// keyed this off :hover on the button/badge itself, which only worked if
+// the pointer happened to land exactly on the (small, icon-sized) element.
+// :focus stays scoped to the element itself: keyboard tabbing lands
+// directly on the button, with no equivalent "row" concept to key off.
+// A button carrying FORCED_LABEL_ATTR (its pending/done/error click
 // states — see createRequestOwnershipButton) always shows its label
 // regardless of hover: those are short-lived, user-initiated status
 // messages the click itself already has the user's attention for, not a
@@ -198,15 +232,19 @@ function ensureStylesInjected(): void {
     [${BADGE_ATTR}] .${LABEL_CLASS} {
       display: none;
     }
-    [${BUTTON_ATTR}]:hover .${ICON_CLASS},
+    [data-row]:hover [${BUTTON_ATTR}] .${ICON_CLASS},
+    [data-row]:hover [${BADGE_ATTR}] .${ICON_CLASS},
+    tr[data-hoverable]:hover [${BUTTON_ATTR}] .${ICON_CLASS},
+    tr[data-hoverable]:hover [${BADGE_ATTR}] .${ICON_CLASS},
     [${BUTTON_ATTR}]:focus .${ICON_CLASS},
-    [${BADGE_ATTR}]:hover .${ICON_CLASS},
     [${BADGE_ATTR}]:focus .${ICON_CLASS} {
       display: none;
     }
-    [${BUTTON_ATTR}]:hover .${LABEL_CLASS},
+    [data-row]:hover [${BUTTON_ATTR}] .${LABEL_CLASS},
+    [data-row]:hover [${BADGE_ATTR}] .${LABEL_CLASS},
+    tr[data-hoverable]:hover [${BUTTON_ATTR}] .${LABEL_CLASS},
+    tr[data-hoverable]:hover [${BADGE_ATTR}] .${LABEL_CLASS},
     [${BUTTON_ATTR}]:focus .${LABEL_CLASS},
-    [${BADGE_ATTR}]:hover .${LABEL_CLASS},
     [${BADGE_ATTR}]:focus .${LABEL_CLASS} {
       display: inline;
     }
@@ -318,9 +356,9 @@ export function isOwnershipBadge(element: Element): boolean {
   return element.hasAttribute(BADGE_ATTR)
 }
 
-// injectElement places element as a sibling immediately before target's
-// "more options" trigger — see this file's own top-of-file doc comment for
-// why that's the chosen anchor rather than a hardcoded layout class.
+// injectElement defers entirely to target's own mount callback — see
+// findSidebarTargets/findChatsTableTargets for what that does on each
+// surface, and this file's own top-of-file doc comment for why they differ.
 export function injectElement(target: OwnershipTarget, element: HTMLElement): void {
-  target.moreOptionsButton.before(element)
+  target.mount(element)
 }
