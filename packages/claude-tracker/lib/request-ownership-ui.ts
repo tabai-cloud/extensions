@@ -99,6 +99,84 @@ const LABEL_IDLE = "Solicitar acesso"
 const LABEL_PENDING = "Solicitando…"
 const LABEL_DONE = "Solicitado"
 const LABEL_ERROR = "Erro — tentar novamente"
+const LABEL_OWNED = "Acesso concedido"
+
+const BUTTON_ATTR = "data-tabai-request-ownership"
+const BADGE_ATTR = "data-tabai-ownership-badge"
+const STYLE_ELEMENT_ID = "tabai-ownership-styles"
+
+// A real stylesheet, not inline styles: an early version used
+// button.style.cssText with `opacity: 0.75` and no background at all, which
+// visually merged with claude.ai's own row text underneath (the sidebar
+// masks/fades its title text right where these hover-reveal controls sit —
+// see findSidebarTargets's own doc comment — so a translucent button let
+// that faded text show straight through). A solid background per color
+// scheme, plus an explicit stacking context (position + z-index), fixes
+// both the legibility issue and any future stacking surprise from
+// claude.ai's own layered UI — cheap insurance even though piggybacking on
+// the "more options" trigger's own wrapper (see this file's top-of-file
+// doc comment) hasn't shown a real stacking bug so far.
+//
+// Injected once per content-script lifetime, into the real page DOM
+// (content scripts share the page's DOM even in the isolated JS world), not
+// per-button — every button/badge just references the shared class names
+// below.
+function ensureStylesInjected(): void {
+  if (document.getElementById(STYLE_ELEMENT_ID)) return
+  const style = document.createElement("style")
+  style.id = STYLE_ELEMENT_ID
+  style.textContent = `
+    [${BUTTON_ATTR}], [${BADGE_ATTR}] {
+      all: unset;
+      box-sizing: border-box;
+      display: inline-flex;
+      align-items: center;
+      position: relative;
+      z-index: 999999;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    [${BUTTON_ATTR}] {
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      background-color: #ffffff;
+      color: #1a1a1a;
+    }
+    [${BUTTON_ATTR}]:hover:not(:disabled) {
+      background-color: #f2f2f2;
+    }
+    [${BUTTON_ATTR}]:disabled {
+      cursor: default;
+      opacity: 0.7;
+    }
+    [${BADGE_ATTR}] {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background-color: #e6f4ea;
+      color: #1e7e34;
+      font-weight: 500;
+    }
+    @media (prefers-color-scheme: dark) {
+      [${BUTTON_ATTR}] {
+        border-color: rgba(255, 255, 255, 0.25);
+        background-color: #2a2a2a;
+        color: #f2f2f2;
+      }
+      [${BUTTON_ATTR}]:hover:not(:disabled) {
+        background-color: #3a3a3a;
+      }
+      [${BADGE_ATTR}] {
+        background-color: rgba(46, 160, 67, 0.25);
+        color: #6fdd8b;
+      }
+    }
+  `
+  document.head.append(style)
+}
 
 // createRequestOwnershipButton builds one plain-text `<button>` (per the
 // product decision behind this feature: text, not an icon, so its intent
@@ -109,15 +187,11 @@ const LABEL_ERROR = "Erro — tentar novamente"
 // convex/integrationOwnershipRequests/mutations.ts#create, so an optimistic
 // per-click button is enough).
 export function createRequestOwnershipButton(resourceId: string, onRequest: RequestOwnershipHandler): HTMLButtonElement {
+  ensureStylesInjected()
   const button = document.createElement("button")
   button.type = "button"
   button.textContent = LABEL_IDLE
-  button.setAttribute("data-tabai-request-ownership", "1")
-  // Inline styling, not a stylesheet class: this button is injected into a
-  // page this extension doesn't own and has no build-time access to
-  // claude.ai's own CSS modules/class names to blend in with automatically.
-  button.style.cssText =
-    "all: unset; cursor: pointer; font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid currentColor; opacity: 0.75; white-space: nowrap;"
+  button.setAttribute(BUTTON_ATTR, "1")
 
   button.addEventListener("click", (event) => {
     event.preventDefault()
@@ -140,9 +214,29 @@ export function createRequestOwnershipButton(resourceId: string, onRequest: Requ
   return button
 }
 
-// injectButton places button as a sibling immediately before target's
+// createOwnershipBadge marks a chat the user already has tracked access
+// to — see request-ownership.content.ts's ownedIds/reconcileOwnership for
+// how a row gets upgraded from the request button to this badge once an
+// admin approval (or the original auto-claim) is reflected in the next
+// ownership refresh.
+export function createOwnershipBadge(): HTMLSpanElement {
+  ensureStylesInjected()
+  const badge = document.createElement("span")
+  badge.textContent = LABEL_OWNED
+  badge.setAttribute(BADGE_ATTR, "1")
+  return badge
+}
+
+// isOwnershipBadge lets callers tell the two element kinds apart without
+// threading extra state — used by reconcileOwnership to skip a slot that's
+// already a badge.
+export function isOwnershipBadge(element: Element): boolean {
+  return element.hasAttribute(BADGE_ATTR)
+}
+
+// injectElement places element as a sibling immediately before target's
 // "more options" trigger — see this file's own top-of-file doc comment for
 // why that's the chosen anchor rather than a hardcoded layout class.
-export function injectButton(target: OwnershipTarget, button: HTMLButtonElement): void {
-  target.moreOptionsButton.before(button)
+export function injectElement(target: OwnershipTarget, element: HTMLElement): void {
+  target.moreOptionsButton.before(element)
 }

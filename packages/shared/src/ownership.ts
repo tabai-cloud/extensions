@@ -41,3 +41,37 @@ export async function requestOwnership(source: string, type: string, resourceId:
     return false
   }
 }
+
+// listOwnership GETs this workload's own operator-local
+// GET /workloads/{name}/integrations/ownership endpoint (see
+// ai-cloud-operator's internal/api.Server#handleListIntegrationOwnership) —
+// every resourceId Convex has on record as already owned by this workload's
+// user for the given (source, type) pair, across every workload that user
+// has ever run. Drives the "already have access" badge in claude-tracker's
+// own content script (see request-ownership.content.ts) — a null return
+// (config not loaded yet, or the call failed) is deliberately distinct from
+// an empty array (genuinely owns nothing yet), so the caller can leave its
+// previous snapshot untouched on a transient failure instead of flashing
+// every badge back to a button — same "failed fetch changes nothing"
+// convention ai-cloud-agent's own OwnershipCache poll loop uses.
+export async function listOwnership(source: string, type: string): Promise<string[] | null> {
+  const config = await loadConfig()
+  if (!config) return null
+
+  try {
+    const query = new URLSearchParams({ source, type })
+    const response = await fetch(
+      `${config.operatorApiBaseUrl}/workloads/${config.workloadName}/integrations/ownership?${query.toString()}`,
+      { headers: { Authorization: `Bearer ${config.localSecret}` } }
+    )
+    if (!response.ok) {
+      console.error("[ai-cloud-tracker] list ownership failed", response.status)
+      return null
+    }
+    const body = (await response.json()) as { resourceIds?: string[] }
+    return body.resourceIds ?? []
+  } catch (err) {
+    console.error("[ai-cloud-tracker] list ownership error", err)
+    return null
+  }
+}
