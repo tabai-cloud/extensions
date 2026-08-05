@@ -5,8 +5,8 @@ import { defineConfig } from "wxt"
 // policy (see internal/catalog/tracker.go), never installed interactively,
 // and only does one thing now: a periodic usage-limit heartbeat (see
 // entrypoints/background.ts's own doc comment for why message-send
-// detection moved to gojnimer-labs/ai-cloud-agent but this stayed). A
-// planned, unrelated in-page UI-overlay feature will add its own
+// detection moved to packages/claude-mitm but this stayed). A planned,
+// unrelated in-page UI-overlay feature will add its own
 // content_scripts/host_permissions on top of this later.
 export default defineConfig({
   manifest: {

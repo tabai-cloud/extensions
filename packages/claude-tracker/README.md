@@ -6,22 +6,21 @@ options page, no `chrome.storage` UI of any kind.
 
 See the repo root README for the shared reporting architecture (this
 package and its `gpt-tracker` sibling both use `@ai-cloud-tracker/shared`
-for config bootstrap + operator reporting), and
-[gojnimer-labs/ai-cloud-agent](https://github.com/gojnimer-labs/ai-cloud-agent)'s
+for config bootstrap + operator reporting), and `packages/claude-mitm`'s
 own README for where message-send detection (per-model counts) actually
-lives now — not here, and not in this repo at all anymore.
+lives now — not here.
 
 ## How it works
 
 - `entrypoints/background.ts` is the whole extension: a background service
   worker, no content scripts, no `chrome.webRequest` listener. It used to
   also detect message sends (matching claude.ai's completion endpoints);
-  that moved to ai-cloud-agent, a standalone mitmproxy sidecar repo that can
-  see Anthropic's official "Claude for Chrome" sidebar extension's traffic
-  too — something `chrome.webRequest` structurally cannot, since one
-  extension can't observe network requests initiated from another
-  extension's own privileged context (confirmed empirically — see that
-  repo's README for the full investigation).
+  that moved to `packages/claude-mitm`, a mitmproxy sidecar that can see
+  Anthropic's official "Claude for Chrome" sidebar extension's traffic too
+  — something `chrome.webRequest` structurally cannot, since one extension
+  can't observe network requests initiated from another extension's own
+  privileged context (confirmed empirically — see `claude-mitm`'s README
+  for the full investigation).
 - What's left here is purely the usage-limit heartbeat: `chrome.alarms`
   fires every 15 minutes, `lib/claude-api.ts#fetchUsage` calls
   `GET https://claude.ai/api/organizations/{orgId}/usage` (a plain,
@@ -32,18 +31,18 @@ lives now — not here, and not in this repo at all anymore.
   `shared/dataclasses.js`.
 - `chrome.cookies.get({name: 'lastActiveOrg', ...})` is the org-ID-discovery
   fallback for the heartbeat.
-- **Why the heartbeat stays here instead of also moving to ai-cloud-agent**:
-  tried and reverted. ai-cloud-agent's own sidecar briefly had its own
-  active heartbeat (polling `/usage` directly from the sidecar's own
-  process), but claude.ai sits behind Cloudflare bot detection, and a
-  script-originated request — different network origin, different TLS
-  fingerprint than a real browser tab — got blocked (HTTP 403) even
-  replaying a captured session cookie and a real User-Agent. A genuine
-  `fetch()` from inside this extension's own background worker doesn't have
-  that problem: it IS the real browser request. Since ai-cloud-agent's
-  sidecar is only ever deployed alongside this extension, never instead of
-  it (see `ai-cloud-operator`'s `internal/catalog/tracker.go`), keeping the
-  heartbeat here leaves no coverage gap.
+- **Why the heartbeat stays here instead of also moving to `claude-mitm`**:
+  tried and reverted. `claude-mitm` briefly had its own active heartbeat
+  (polling `/usage` directly from the sidecar's own process), but claude.ai
+  sits behind Cloudflare bot detection, and a script-originated request —
+  different network origin, different TLS fingerprint than a real browser
+  tab — got blocked (HTTP 403) even replaying a captured session cookie and
+  a real User-Agent. A genuine `fetch()` from inside this extension's own
+  background worker doesn't have that problem: it IS the real browser
+  request. Since `claude-mitm` is only ever deployed alongside this
+  extension, never instead of it (see `ai-cloud-operator`'s
+  `internal/catalog/tracker.go`), keeping the heartbeat here leaves no
+  coverage gap.
 
 ## Install (manual/dev)
 
