@@ -1,13 +1,17 @@
 import { defineConfig } from "wxt"
 
-// No content_scripts, no popup/options page, no action icon — this
-// extension is force-installed via ai-cloud-operator's ExtensionSettings
-// policy (see internal/catalog/tracker.go), never installed interactively,
-// and only does one thing now: a periodic usage-limit heartbeat (see
-// entrypoints/background.ts's own doc comment for why message-send
-// detection moved to gojnimer-labs/ai-cloud-agent but this stayed). A
-// planned, unrelated in-page UI-overlay feature will add its own
-// content_scripts/host_permissions on top of this later.
+// No popup/options page, no action icon — this extension is force-installed
+// via ai-cloud-operator's ExtensionSettings policy (see
+// internal/catalog/tracker.go), never installed interactively. Besides the
+// periodic usage-limit heartbeat (see entrypoints/background.ts's own doc
+// comment for why message-send detection moved to
+// gojnimer-labs/ai-cloud-agent but this stayed), it also injects a
+// "Solicitar acesso" button into claude.ai's own chat sidebar/list — see
+// entrypoints/request-ownership.content.ts, a file-based WXT content
+// script (matches declared there, not here) that needs no additional
+// host_permissions beyond the <all_urls> already granted below (the
+// button's own backend call goes through the background worker, which
+// already has that grant).
 export default defineConfig({
   manifest: {
     name: "TabAi Cloud",
