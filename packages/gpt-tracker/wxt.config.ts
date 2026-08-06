@@ -8,7 +8,7 @@ import { defineConfig } from "wxt"
 // entrypoints/gpt-relay.content.ts): chatgpt.com has no direct GET /usage
 // endpoint the way claude.ai does, so usage signals can only be observed by
 // sniffing chatgpt.com's own /backend-api/* response bodies as they fly by
-// — the same technique gojnimer-labs/ai-cloud-tracker's original
+// — the same technique tabai-cloud/extensions's original
 // contents/chatgpt-usage.ts used, ported here without its popup UI.
 export default defineConfig({
   manifest: {

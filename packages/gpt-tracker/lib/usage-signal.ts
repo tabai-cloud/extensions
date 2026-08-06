@@ -2,7 +2,7 @@ import type { MetricSample } from "@ai-cloud-tracker/shared"
 
 // UsagePayload is what gpt-signal.content.ts relays: the raw
 // limits_progress/model_limits fields chatgpt.com's own /backend-api/*
-// responses carry, per gojnimer-labs/ai-cloud-tracker's original
+// responses carry, per tabai-cloud/extensions's original
 // contents/chatgpt-usage.ts (its own comment: "limits_progress (the
 // primary chat/message cap — empty until you're close to/over it) and
 // model_limits (per-feature remaining count + reset_after timestamp, e.g.

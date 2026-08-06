@@ -13,7 +13,7 @@ package and its `claude-tracker` sibling both use
 claude.ai exposes a direct `GET /api/organizations/{orgId}/usage` endpoint,
 so `claude-tracker` is pure background-service-worker — no content
 scripts needed at all. chatgpt.com has no equivalent endpoint (confirmed by
-the original [gojnimer-labs/ai-cloud-tracker](https://github.com/gojnimer-labs/ai-cloud-tracker)
+the original [tabai-cloud/extensions](https://github.com/tabai-cloud/extensions)
 POC, which only ever found usage fields by watching real response bodies),
 so this package needs the same content-script technique that POC used:
 
@@ -67,7 +67,7 @@ Load `.output/chrome-mv3` as an unpacked extension via `chrome://extensions`
 
 ```
 TRACKER_PACKAGE=gpt-tracker \
-  wget -qO- https://raw.githubusercontent.com/gojnimer-labs/ai-cloud-tracker/main/scripts/install.sh | sh
+  wget -qO- https://raw.githubusercontent.com/tabai-cloud/extensions/main/scripts/install.sh | sh
 ```
 
 See the repo root's `scripts/install.sh`. `extension/` is a committed,

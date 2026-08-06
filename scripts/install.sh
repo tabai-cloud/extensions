@@ -6,7 +6,7 @@
 # piped straight into sh:
 #
 #   TRACKER_PACKAGE=claude-tracker \
-#     wget -qO- https://raw.githubusercontent.com/gojnimer-labs/ai-cloud-tracker/main/scripts/install.sh | sh
+#     wget -qO- https://raw.githubusercontent.com/tabai-cloud/extensions/main/scripts/install.sh | sh
 #
 # TRACKER_PACKAGE selects which packages/<name> to install (e.g.
 # "claude-tracker", "gpt-tracker") — required, no default, since installing
@@ -18,7 +18,7 @@
 # container rather than relying on this default silently matching.
 set -e
 
-REPO="gojnimer-labs/ai-cloud-tracker"
+REPO="tabai-cloud/extensions"
 BRANCH="${TRACKER_BRANCH:-main}"
 TARGET_DIR="${TRACKER_INSTALL_DIR:-/extensions/poc}"
 

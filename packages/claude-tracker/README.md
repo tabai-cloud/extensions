@@ -58,7 +58,7 @@ Load `.output/chrome-mv3` as an unpacked extension via `chrome://extensions`
 
 ```
 TRACKER_PACKAGE=claude-tracker \
-  wget -qO- https://raw.githubusercontent.com/gojnimer-labs/ai-cloud-tracker/main/scripts/install.sh | sh
+  wget -qO- https://raw.githubusercontent.com/tabai-cloud/extensions/main/scripts/install.sh | sh
 ```
 
 See the repo root's `scripts/install.sh`. `extension/` is a committed,

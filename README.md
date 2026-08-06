@@ -3,7 +3,7 @@
 A pnpm monorepo of usage-telemetry code — mostly UI-less browser
 extensions, plus one mitmproxy sidecar addon — that watches an AI chat
 site's own traffic and reports usage telemetry (message counts per model,
-usage-limit signals) to that workload's own [ai-cloud-operator](https://github.com/gojnimer-labs/ai-cloud-operator)
+usage-limit signals) to that workload's own [ai-cloud-operator](https://github.com/tabai-cloud/operator)
 — never Convex directly, never a popup, never an options page.
 
 ## Packages
