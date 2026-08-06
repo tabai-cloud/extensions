@@ -4,7 +4,7 @@
 // window.postMessage -> chrome.runtime.sendMessage, into the background
 // service worker.
 //
-// Unlike gojnimer-labs/ai-cloud-tracker's original relay.ts (which wrote
+// Unlike tabai-cloud/extensions's original relay.ts (which wrote
 // straight to chrome.storage.local specifically to dodge a cold MV3 service
 // worker silently dropping a chrome.runtime.sendMessage), this DOES route
 // through the background: chrome.runtime.sendMessage reliably wakes a

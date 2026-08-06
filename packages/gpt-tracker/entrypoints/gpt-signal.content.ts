@@ -4,7 +4,7 @@
 // never body content, in both MV2 and MV3). MAIN-world scripts have no
 // chrome.* APIs at all, so the only way out is window.postMessage to the
 // ISOLATED-world relay content script (see gpt-relay.content.ts) sharing
-// this same page's `window`. Ported from gojnimer-labs/ai-cloud-tracker's
+// this same page's `window`. Ported from tabai-cloud/extensions's
 // original contents/chatgpt-usage.ts, minus its popup-facing extras.
 export default defineContentScript({
   matches: ["https://chatgpt.com/*", "https://chat.openai.com/*"],
