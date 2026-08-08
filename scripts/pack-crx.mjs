@@ -1,33 +1,13 @@
 #!/usr/bin/env node
-// Packs a WXT-built extension into a signed CRX3 + local update manifest,
-// so ai-cloud-operator can force-install it via Chromium's ExtensionSettings
-// policy (see that repo's internal/catalog/tracker.go) instead of the
-// user-removable --load-extension flag.
-//
-// Run from a package directory (e.g. packages/claude-tracker) after `wxt
-// build` — reads ./.output/chrome-mv3, mirrors it into ./extension/ (the
-// prebuilt bundle ai-cloud-operator's install.sh downloads today, kept for
-// any --load-extension-based local dev/testing), then packs that same
-// content into ./extension.crx.
-//
-// The signing key (./signing-key.pem) is generated once and reused on every
-// subsequent run — the extension's ID is derived entirely from this key
-// (see crxIdFromPublicKey), so reusing it is what keeps the ID stable
-// across releases. Committed to the repo deliberately: it only pins an ID,
-// it doesn't gate distribution (ai-cloud-operator always fetches
-// extension.crx from this repo directly, never validates anyone else's
-// signature against it).
+// WHY: docs/notes/force-install-via-policy.md#force-install-via-policy — packs a WXT-built extension into a signed CRX3 so ai-cloud-operator can force-install it via policy instead of the user-removable --load-extension flag.
+// WHY: docs/notes/extension-dual-build-output.md#extension-dual-build-output — reads wxt build's ./.output/chrome-mv3, mirrors it into ./extension/ (also used for local --load-extension dev), then packs that same content into ./extension.crx.
+// WHY: docs/notes/crx-signing-key-stability.md#crx-signing-key-stability — ./signing-key.pem is generated once and committed; reused on every run to keep the derived extension ID stable across releases.
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, copyFileSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { generateKeyPairSync, sign as cryptoSign, createHash, createPrivateKey, createPublicKey, constants as cryptoConstants } from "node:crypto";
 import { crc32 } from "node:zlib";
 
-// Must match ai-cloud-operator's internal/catalog/tracker.go
-// trackerExtensionInstallDir constant exactly — this is where the operator's
-// install-tracker-extension init container places extension.crx, and this
-// hardcoded codebase is what tells Chromium's policy-driven updater where
-// to find it on that same pod's filesystem. No per-deploy templating: every
-// workload uses the identical fixed path.
+// WHY: docs/notes/force-install-via-policy.md#force-install-via-policy — must match ai-cloud-operator's trackerExtensionInstallDir constant exactly; no per-deploy templating, every workload uses this identical fixed path.
 const TRACKER_EXTENSION_INSTALL_DIR = "/extensions/poc";
 
 const SIGNATURE_CONTEXT = Buffer.from("CRX3 SignedData\0", "binary");
@@ -56,12 +36,7 @@ function syncDir(srcDir, destDir) {
   }
 }
 
-// Minimal ZIP writer — stored (uncompressed) entries only, which is all
-// CRX3 needs (Chromium decompresses nothing extra beyond the zip format
-// itself, and these bundles are a few KB, so there's no benefit to
-// implementing deflate here). Fixed 1980-01-01 mod time/date on every
-// entry for reproducible output (byte-identical zip given identical
-// input), not because the value has any meaning to Chromium.
+// WHY: docs/notes/reproducible-zip-output.md#reproducible-zip-output — stored (uncompressed) entries only, no deflate; fixed 1980-01-01 mod time on every entry for byte-identical, reproducible output.
 function buildZip(files) {
   const localChunks = [];
   const centralChunks = [];

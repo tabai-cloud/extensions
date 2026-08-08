@@ -4,6 +4,7 @@ used_by:
   - packages/claude-tracker/wxt.config.ts
   - packages/gpt-tracker/wxt.config.ts
   - scripts/install.sh
+  - scripts/pack-crx.mjs
 sidebar:
   badge: { text: extensions, variant: note }
 ---
@@ -45,3 +46,17 @@ should ever need to override — `TRACKER_INSTALL_DIR` must match
 ai-cloud-operator's own `trackerExtensionInstallDir` constant, passed
 explicitly by that init container rather than relying on this default
 silently matching.
+
+### scripts/pack-crx.mjs
+
+Packs a WXT-built extension into a signed CRX3 + local update manifest,
+so ai-cloud-operator can force-install it via Chromium's
+`ExtensionSettings` policy (see that repo's `internal/catalog/tracker.go`)
+instead of the user-removable `--load-extension` flag.
+`TRACKER_EXTENSION_INSTALL_DIR` must match ai-cloud-operator's
+`internal/catalog/tracker.go` `trackerExtensionInstallDir` constant
+exactly — this is where the operator's install-tracker-extension init
+container places `extension.crx`, and this hardcoded path is what tells
+Chromium's policy-driven updater where to find it on that same pod's
+filesystem. No per-deploy templating: every workload uses the identical
+fixed path.
