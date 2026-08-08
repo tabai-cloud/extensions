@@ -3,6 +3,7 @@ title: MV3 service-worker lifecycle constraints
 used_by:
   - packages/claude-tracker/entrypoints/background.ts
   - packages/gpt-tracker/entrypoints/background.ts
+  - packages/gpt-tracker/entrypoints/gpt-relay.content.ts
 sidebar:
   badge: { text: extensions, variant: note }
 ---
@@ -37,3 +38,20 @@ the top level, same reasoning as claude-tracker's own alarm/message
 listeners: re-arms correctly on every MV3 service-worker wake.
 `chrome.runtime.sendMessage` from `gpt-relay.content.ts` is what actually
 wakes a dormant worker to deliver this in the first place.
+
+### packages/gpt-tracker/entrypoints/gpt-relay.content.ts
+
+This ISOLATED-world content script (WXT's default) shares chatgpt.com's
+page `window` with `gpt-signal.content.ts`'s MAIN-world script, but
+unlike that one, this script keeps normal extension privileges. Its only
+job is to bridge `window.postMessage` -> `chrome.runtime.sendMessage`,
+into the background service worker. Unlike this repo's original
+`relay.ts` (which wrote straight to `chrome.storage.local` specifically
+to dodge a cold MV3 service worker silently dropping a
+`chrome.runtime.sendMessage`), this DOES route through the background:
+`chrome.runtime.sendMessage` reliably wakes a dormant MV3 service worker
+to receive it, and the background needs to be the one making the
+authenticated report call to the operator anyway (content scripts have
+no business holding the operator's local secret or making that call
+themselves) — keeping every operator-facing HTTP call centralized in one
+place, the same as claude-tracker's design.

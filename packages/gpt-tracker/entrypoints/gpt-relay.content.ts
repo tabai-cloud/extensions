@@ -1,25 +1,7 @@
-// ISOLATED world (WXT's default — no `world` key) sharing chatgpt.com's page
-// `window` with gpt-signal.content.ts's MAIN-world script, but unlike that
-// one, THIS script keeps normal extension privileges. Its only job: bridge
-// window.postMessage -> chrome.runtime.sendMessage, into the background
-// service worker.
-//
-// Unlike tabai-cloud/extensions's original relay.ts (which wrote
-// straight to chrome.storage.local specifically to dodge a cold MV3 service
-// worker silently dropping a chrome.runtime.sendMessage), this DOES route
-// through the background: chrome.runtime.sendMessage reliably wakes a
-// dormant MV3 service worker to receive it, and the background needs to be
-// the one making the authenticated report call to the operator anyway
-// (content scripts have no business holding the operator's local secret or
-// making that call themselves) — keeping every operator-facing HTTP call
-// centralized in one place, the same as claude-tracker's design.
+// WHY: docs/notes/mv3-worker-lifecycle.md#mv3-worker-lifecycle — ISOLATED-world relay bridges window.postMessage -> chrome.runtime.sendMessage so the background worker (not the content script) makes the authenticated operator call.
 export default defineContentScript({
   matches: ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-  // Must match gpt-signal.content.ts's document_start: that MAIN-world script
-  // starts posting messages the instant its fetch hook installs, and this
-  // listener has to already be registered by then — at the default
-  // document_idle, every signal fired before idle is dropped silently (no
-  // queue, no error) since window.postMessage has no listener yet.
+  // WHY: docs/notes/gpt-content-script-timing-race.md#gpt-content-script-timing-race — must match gpt-signal.content.ts's document_start or signals fired before document_idle are dropped silently.
   runAt: "document_start",
   main() {
     const RELAY_SOURCE = "gpt-tracker"
