@@ -1,11 +1,4 @@
-// MAIN world: runs in the page's own JS context, so it wraps the exact same
-// window.fetch the ChatGPT frontend itself calls — this is what lets us read
-// full response BODIES (chrome.webRequest only ever exposes headers/status,
-// never body content, in both MV2 and MV3). MAIN-world scripts have no
-// chrome.* APIs at all, so the only way out is window.postMessage to the
-// ISOLATED-world relay content script (see gpt-relay.content.ts) sharing
-// this same page's `window`. Ported from tabai-cloud/extensions's
-// original contents/chatgpt-usage.ts, minus its popup-facing extras.
+// WHY: docs/notes/webrequest-no-response-bodies.md#webrequest-no-response-bodies — MAIN-world script wrapping window.fetch is the only way to read response bodies; chrome.webRequest never exposes them.
 export default defineContentScript({
   matches: ["https://chatgpt.com/*", "https://chat.openai.com/*"],
   world: "MAIN",
@@ -15,10 +8,8 @@ export default defineContentScript({
     const RELAY_SOURCE = "gpt-tracker"
     const originalFetch = window.fetch.bind(window)
 
-    // The two real usage-signal fields found live on chatgpt.com's own
-    // conversation-metadata responses — see lib/usage-signal.ts's own doc
-    // comment for how much of their shape is actually confirmed vs. a
-    // best-effort guess.
+    // The two real usage-signal fields on chatgpt.com's conversation-metadata
+    // responses — see lib/usage-signal.ts for how confirmed their shape is.
     const USAGE_SIGNAL_KEYS = ["limits_progress", "model_limits"]
 
     function postUsageUpdate(parsed: Record<string, unknown>) {
@@ -36,12 +27,7 @@ export default defineContentScript({
       )
     }
 
-    // MESSAGE_SEND_URL_MARKER is the endpoint that fires once per message
-    // actually sent (confirmed live against real traffic by the original
-    // ai-cloud-tracker POC — see that repo's contents/chatgpt-usage.ts).
-    // Deliberately NOT matching a broader "/backend-api/conversation"
-    // prefix — that also matches GET requests just loading an existing
-    // conversation's history, which must not count as a send.
+    // WHY: docs/notes/message-send-url-marker-precision.md#message-send-url-marker-precision — a narrow marker so GET requests loading conversation history are never miscounted as a send.
     const MESSAGE_SEND_URL_MARKER = "/backend-api/f/conversation"
 
     function postMessageSent(model: string | undefined) {
@@ -51,12 +37,7 @@ export default defineContentScript({
       )
     }
 
-    // Reading a streaming (SSE) response via response.clone().text() waits
-    // for the WHOLE body, so a stream that gets aborted mid-flight (very
-    // common here — ChatGPT's own frontend cancels the previous stream
-    // whenever a new message starts) loses everything. Reading
-    // incrementally via getReader() processes each chunk as it arrives, so
-    // whatever streamed before the abort is still seen.
+    // WHY: docs/notes/sse-stream-abort-handling.md#sse-stream-abort-handling — reading incrementally via getReader() (not response.clone().text()) means a stream aborted mid-flight still yields whatever streamed before the abort.
     async function readEventStream(body: ReadableStream<Uint8Array>) {
       const reader = body.getReader()
       const decoder = new TextDecoder()
@@ -89,9 +70,7 @@ export default defineContentScript({
           }
         }
       } catch (err) {
-        // Expected/harmless: the page's own code aborts the previous stream
-        // whenever a new message starts. Whatever chunks arrived before the
-        // abort were still processed above.
+        // WHY: docs/notes/sse-stream-abort-handling.md#sse-stream-abort-handling — the page's own code aborts the previous stream on a new message; chunks processed above are unaffected, so only a non-AbortError is logged.
         if ((err as Error)?.name !== "AbortError") {
           console.error(TAG, "stream read error", err)
         }
@@ -104,10 +83,7 @@ export default defineContentScript({
         const url = typeof req === "string" ? req : req instanceof URL ? req.toString() : req.url
         const method = (args[1]?.method ?? (req instanceof Request ? req.method : "GET")).toUpperCase()
 
-        // Recorded before awaiting the response — a message "send" is the
-        // request going out, not a successful reply; counting it after the
-        // await would undercount every stream that gets aborted (the
-        // common case here).
+        // WHY: docs/notes/message-send-recorded-pre-response.md#message-send-recorded-pre-response — counted before the await; counting after would undercount every aborted stream (the common case here).
         if (method === "POST" && url.includes(MESSAGE_SEND_URL_MARKER)) {
           let model: string | undefined
           const rawBody = args[1]?.body
