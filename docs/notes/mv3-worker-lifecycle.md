@@ -2,6 +2,7 @@
 title: MV3 service-worker lifecycle constraints
 used_by:
   - packages/claude-tracker/entrypoints/background.ts
+  - packages/gpt-tracker/entrypoints/background.ts
 sidebar:
   badge: { text: extensions, variant: note }
 ---
@@ -28,3 +29,11 @@ worker suspension.
 The config cache is warmed as soon as the worker starts, rather than
 waiting for the first alarm tick to discover whether this workload was
 actually enrolled.
+
+### packages/gpt-tracker/entrypoints/background.ts
+
+The `chrome.runtime.onMessage` listener is registered synchronously at
+the top level, same reasoning as claude-tracker's own alarm/message
+listeners: re-arms correctly on every MV3 service-worker wake.
+`chrome.runtime.sendMessage` from `gpt-relay.content.ts` is what actually
+wakes a dormant worker to deliver this in the first place.

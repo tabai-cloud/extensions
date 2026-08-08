@@ -5,14 +5,7 @@ import { samplesFromUsagePayload, type UsagePayload } from "../lib/usage-signal"
 const HEARTBEAT_ALARM_NAME = "gpt-tracker-heartbeat"
 const HEARTBEAT_PERIOD_MINUTES = 15
 
-// LAST_USAGE_KEY caches the most recently observed usage-signal payload —
-// unlike claude-tracker, there's no direct GET /usage endpoint to
-// (re-)fetch on a heartbeat tick with no fresh page activity, since
-// chatgpt.com's usage signals only ever arrive as a side effect of the
-// content script observing real traffic. Re-reporting the last known
-// values on each heartbeat still gets the same self-healing "try again
-// next tick" resilience for whatever was already observed, even though it
-// can't proactively refresh it.
+// WHY: docs/notes/chatgpt-no-usage-endpoint.md#chatgpt-no-usage-endpoint — chatgpt.com has no direct GET /usage to re-fetch on a heartbeat, so the last observed payload is cached and re-reported instead.
 const LAST_USAGE_KEY = "lastUsagePayload"
 
 interface ContentMessage {
@@ -41,11 +34,7 @@ async function reportCachedUsageIfAny(): Promise<void> {
 }
 
 export default defineBackground(() => {
-  // Registered synchronously at the top level, same reasoning as
-  // claude-tracker's webRequest listener: re-arms correctly on every MV3
-  // service-worker wake. chrome.runtime.sendMessage from
-  // gpt-relay.content.ts is what actually wakes a dormant worker to
-  // deliver this in the first place.
+  // WHY: docs/notes/mv3-worker-lifecycle.md#mv3-worker-lifecycle — registered synchronously at the top level so it re-arms on every MV3 wake; chrome.runtime.sendMessage from gpt-relay.content.ts is what wakes a dormant worker.
   chrome.runtime.onMessage.addListener((message: ContentMessage) => {
     if (message?.type === "message-sent") {
       handleMessageSent((message.payload as { model?: string }) ?? {}).catch((err) =>
