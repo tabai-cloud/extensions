@@ -26,15 +26,7 @@ const SCOPED_MODEL_KEY: Record<string, keyof UsageLimits> = {
   fable: "weeklyFable"
 }
 
-// parseUsage ports lugia19/Claude-Usage-Extension's shared/dataclasses.js —
-// UsageData.fromAPIResponse/parseNewLimits: prefers the newer, authoritative
-// `limits` array (`{kind, percent, scope}`) when present, falling back to
-// the older top-level five_hour/seven_day/seven_day_sonnet/seven_day_opus
-// fields otherwise. Claude's own API has shipped both response shapes at
-// different times with no version header to branch on ahead of time, so
-// both are handled rather than assuming only the current one will ever show
-// up. weeklyFable has no old-format fallback — the old shape predates
-// Fable's own scoped weekly limit existing at all.
+// WHY: docs/notes/claude-usage-response-shapes.md#claude-usage-response-shapes — ports lugia19/Claude-Usage-Extension's parser; supports both the newer `limits` array shape and the older top-level fields since claude.ai has shipped both with no version header to branch on.
 export function parseUsage(raw: RawUsageResponse): UsageLimits {
   if (Array.isArray(raw.limits) && raw.limits.length > 0) {
     const limits: UsageLimits = {
@@ -68,18 +60,7 @@ export function parseUsage(raw: RawUsageResponse): UsageLimits {
   }
 }
 
-// fetchUsage calls claude.ai's own usage endpoint directly, with no
-// Authorization header of our own — this extension's host_permissions
-// cover claude.ai (see wxt.config.ts), which makes a background-context
-// fetch attach the browser's existing session cookies automatically,
-// bypassing normal cross-origin CORS restrictions. Confirmed against
-// lugia19/Claude-Usage-Extension's own ContainerStrategy.fetch default
-// (Chrome/Electron) path: a plain `fetch(url, options)`, no manual cookie
-// handling at all. This is exactly the browser-native request claude-mitm's
-// own active-heartbeat attempt (tried and reverted, see that package's own
-// addon.py doc comment) couldn't replicate from outside the browser: right
-// network origin, right TLS fingerprint, every header exactly what
-// Cloudflare's bot detection expects, for free.
+// WHY: docs/notes/cloudflare-blocks-sidecar-polling.md#cloudflare-blocks-sidecar-polling — a background-context fetch attaches the browser's real session/TLS fingerprint for free, which claude-mitm's own out-of-browser polling attempt couldn't replicate.
 export async function fetchUsage(orgId: string): Promise<UsageLimits | null> {
   try {
     const response = await fetch(`https://claude.ai/api/organizations/${orgId}/usage`, {
