@@ -102,6 +102,14 @@ def collect_notes(root):
         for m in ANCHOR_RE.finditer(body):
             entry["anchors"].add(m.group(1))
 
+        if len(entry["anchors"]) > 1:
+            entry["errors"].append(
+                f"{rel}:1: nota tem {len(entry['anchors'])} ancoras ({', '.join(sorted(entry['anchors']))}) - "
+                "convencao do projeto e uma nota = um topico = uma ancora, porque used_by e por nota inteira, "
+                "nao por ancora (used_by nao consegue expressar 'este arquivo usa so a ancora X'). "
+                "Separe em notas distintas."
+            )
+
         notes[rel] = entry
     return notes
 
