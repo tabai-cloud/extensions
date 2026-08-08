@@ -2,53 +2,13 @@
 model) to this workload's own ai-cloud-operator, the same metric
 claude-tracker's browser extension already reported.
 
-Why this exists alongside (and now instead of, for message-send detection)
-claude-tracker's own chrome.webRequest-based detection: Chrome's webRequest
-API does not let one extension observe network requests initiated from
-ANOTHER extension's own privileged context (background service worker, side
-panel, popup) — only requests happening in a real tab/page are visible
-cross-extension. Anthropic's own "Claude for Chrome" sidebar extension sends
-messages via api.anthropic.com/v1/messages entirely from its own side
-panel's JS context, so claude-tracker could never see it no matter what URL
-pattern it registered — confirmed empirically with a diagnostic webRequest
-listener that saw zero requests to api.anthropic.com while a
-chrome://net-export capture of the same session showed the sidebar's
-traffic clearly happening. A TLS-intercepting proxy sits below the
-extension permission model entirely, so it sees both claude.ai's own webapp
-traffic AND the sidebar's, uniformly — see this package's own README for
-the full investigation.
+WHY: docs/notes/webrequest-cross-extension-blindspot.md#webrequest-cross-extension-blindspot — exists alongside (and now instead of, for message-send detection) claude-tracker's own chrome.webRequest-based detection, which cannot see the "Claude for Chrome" sidebar's own cross-extension traffic.
 
---allow-hosts (set by whoever launches mitmdump with this addon, see
-ai-cloud-operator's internal/catalog/tracker.go) should be scoped to
-anthropic.com/claude.ai/claudeusercontent.com specifically — this addon does
-not enforce that itself, it trusts the launch configuration to keep every
-other host in the browser passing through undecrypted.
+WHY: docs/notes/mitm-allow-hosts-trust.md#mitm-allow-hosts-trust — --allow-hosts scoping is trusted to the launch configuration, not enforced by this addon itself.
 
-Deliberately extracts only the fields it needs (model, stop_reason, usage
-percentages) and never logs, stores, or forwards conversation content —
-system prompts, message text, tool inputs/outputs, or response text. Despite
-having technical access to full plaintext (that's the whole point of the
-proxy), this addon's privacy posture is meant to match claude-tracker's own:
-counts and percentages only, never content.
+WHY: docs/notes/mitm-privacy-posture.md#mitm-privacy-posture — deliberately extracts only model/stop_reason/usage percentages, never conversation content, despite having full plaintext access.
 
-Usage-limit percentages are reported passively here — off whatever /usage
-responses the browser happens to make on its own (response(), cheap and
-immediate when it happens) — but NOT actively polled from this process.
-That was tried (an earlier version of this file ran its own background
-heartbeat thread hitting /usage directly via urllib) and reverted: claude.ai
-sits behind Cloudflare bot detection, and a script-originated request from
-this sidecar's own process — not a real browser tab, different network
-origin, different TLS fingerprint — got flagged even after replaying a
-captured session cookie AND a real User-Agent/Referer (confirmed live,
-2026-08-04: HTTP 403). A genuine `fetch()` from inside the browser itself
-sails through for free, with the right origin/fingerprint/headers by
-construction, and doesn't have to fight an arms race we don't control
-either side of. So the guaranteed-cadence usage heartbeat lives back in
-claude-tracker's own chrome.alarms — see that package's background.ts —
-since it's a general, account-level, non-sidebar-specific metric, there's
-no coverage gap left by keeping it there: claude-tracker's extension is
-force-installed unconditionally whenever claude-mitm is (see tracker.go),
-so it's always present to do this half of the job.
+WHY: docs/notes/cloudflare-blocks-sidecar-polling.md#cloudflare-blocks-sidecar-polling — usage percentages are reported passively off whatever /usage responses the browser makes on its own; active polling from this process was tried and reverted (Cloudflare 403).
 """
 
 import json
@@ -64,9 +24,7 @@ OPERATOR_API_BASE_URL = os.environ.get("EXTENSION_API_BASE_URL", "")
 WORKLOAD_NAME = os.environ.get("EXTENSION_WORKLOAD_NAME", "")
 LOCAL_SECRET = os.environ.get("EXTENSION_LOCAL_SECRET", "")
 
-# Matches claude-tracker's own MESSAGE_SEND_URL_PATTERNS (background.ts) —
-# kept in sync by hand, not shared code, since one's a TS webRequest filter
-# and the other's a Python path check.
+# WHY: docs/notes/claude-message-send-url-sync.md#claude-message-send-url-sync — kept in sync by hand with claude-tracker's own URL matching, not shared code.
 WEBAPP_COMPLETION_SUFFIXES = ("/completion", "/retry_completion")
 MESSAGES_API_PATH = "/v1/messages"
 USAGE_PATH_SUFFIX = "/usage"
@@ -81,11 +39,7 @@ USAGE_METRIC_KEY = {
     "weeklyFable": "claude.usage.weekly_fable",
 }
 
-# module-scope cumulative counters, mirroring @ai-cloud-tracker/shared's
-# incrementMessageCount — this process lives for the pod's whole lifetime
-# (no MV3-style suspend/resume to worry about), so a plain in-memory dict
-# is enough; nothing here needs to survive a restart any more than the
-# extension's own chrome.storage.local counters did.
+# WHY: docs/notes/mitm-counter-lifecycle.md#mitm-counter-lifecycle — a plain in-memory dict is enough since this process lives for the pod's whole lifetime, no MV3-style suspend/resume to worry about.
 _message_counts_lock = threading.Lock()
 _message_counts = {}
 
@@ -171,17 +125,8 @@ def _parse_and_report_usage(raw_body):
 
 
 def _terminal_stop_reason(response):
-    """Scans a /v1/messages SSE response for how the stream actually ended.
-
-    Returns "end_turn" only for a real, successfully-completed reply.
-    Returns None for anything else — an internal tool_use round-trip (e.g.
-    the turn_answer_start step every sidebar turn seems to start with), a
-    server-side error event (e.g. overloaded_error, which the client
-    silently retries), or a response we can't parse. This is a heuristic
-    derived from one real captured session (see README), not something
-    Anthropic documents as a stable contract — expect to revisit if Claude
-    for Chrome's internal orchestration protocol changes shape.
-    """
+    # WHY: docs/notes/sidebar-stop-reason-heuristic.md#sidebar-stop-reason-heuristic — scans an SSE response for
+    # how the stream actually ended; a heuristic derived from one captured session, not a documented contract.
     if response is None:
         return None
     try:
@@ -212,9 +157,8 @@ def request(flow: http.HTTPFlow) -> None:
     url = flow.request.pretty_url
 
     if host == "claude.ai" and url.endswith(WEBAPP_COMPLETION_SUFFIXES):
-        # One POST here is one send, full stop — same semantics
-        # background.ts's own handleMessageSent already relied on, so this
-        # fires on the request itself rather than waiting for a response.
+        # One POST here is one send, full stop — same semantics background.ts's
+        # handleMessageSent relies on; fires on the request, not the response.
         try:
             body = json.loads(flow.request.content)
         except (ValueError, TypeError):

@@ -2,6 +2,7 @@
 title: "chrome.webRequest cannot see another extension's own traffic"
 used_by:
   - packages/claude-tracker/entrypoints/background.ts
+  - packages/claude-mitm/addon.py
 sidebar:
   badge: { text: extensions, variant: note }
 ---
@@ -25,3 +26,13 @@ confirmed empirically with a diagnostic webRequest listener that saw zero
 requests to `api.anthropic.com` while a `chrome://net-export` capture of
 the same session clearly showed the sidebar's traffic happening. See
 `packages/claude-mitm`'s own README for the full investigation.
+
+### packages/claude-mitm/addon.py
+
+This addon exists alongside (and now instead of, for message-send
+detection) claude-tracker's own `chrome.webRequest`-based detection, for
+exactly the blind spot described above: a TLS-intercepting proxy sits
+below the extension permission model entirely, so it sees both
+claude.ai's own webapp traffic AND the "Claude for Chrome" sidebar's,
+uniformly.
+
