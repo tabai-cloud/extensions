@@ -6,21 +6,8 @@ export interface MetricSample {
   sampledAt: number
 }
 
-// reportSamples POSTs samples to this workload's own operator-local
-// POST /workloads/{name}/extension/report endpoint (see ai-cloud-operator's
-// internal/api.Server#handleExtensionReport) — never Convex directly, and
-// authenticated by a per-workload local secret only this operator and this
-// workload's own extension ever hold, not a Convex-facing credential.
-//
-// Best-effort: a failed report is logged, not thrown. The caller's own
-// chrome.storage.local counters are unaffected either way, and the next
-// scheduled report (the next message-send, or the periodic alarm heartbeat
-// each package's own entrypoints/background.ts runs) carries the current,
-// still-correct cumulative values — the same self-healing "try again next
-// tick" resilience the operator's own metrics reporting already relies on
-// (see ai-cloud-operator's internal/metrics.ExtensionCache), so there's no
-// retry/backoff logic to duplicate here. Shared verbatim by every package
-// in this monorepo — reporting is entirely site-agnostic.
+// WHY: docs/notes/operator-local-api-auth.md#operator-local-api-auth — POSTs to this workload's own operator-local endpoint, never Convex directly, authenticated by a per-workload local secret.
+// WHY: docs/notes/best-effort-report-no-retry.md#best-effort-report-no-retry — a failed report is logged, not thrown; the next scheduled report carries current cumulative values, so there's no retry/backoff to duplicate.
 export async function reportSamples(samples: MetricSample[]): Promise<void> {
   if (samples.length === 0) return
 
