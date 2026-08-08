@@ -132,7 +132,6 @@ def main():
     for entry in notes.values():
         errors.extend(entry["errors"])
 
-    # toda ref WHY: precisa apontar pra uma nota e ancora que existem
     referrers = {}  # (doc, anchor) -> set(src relpaths que de fato referenciam)
     for src, line_no, doc, anchor in refs:
         referrers.setdefault((doc, anchor), set()).add(src)
@@ -145,10 +144,7 @@ def main():
                 f"{src}:{line_no}: WHY aponta para '{doc}#{anchor}', mas essa ancora nao existe na nota"
             )
 
-    # Ajuste 2 (DECISIONS.md): used_by precisa bater com quem de fato referencia a nota,
-    # nao so ter caminhos que existem no disco. Comparamos por ancora: se uma nota tem
-    # varias ancoras, o used_by declarado vale para todas (simplificacao razoavel; se
-    # incomodar no piloto, mover used_by para dentro de cada secao).
+    # WHY: docs/notes/check-anchors-used-by-semantics.md#check-anchors-used-by-semantics — used_by e comparado por ancora, nao so por existencia de caminho no disco (Ajuste 2 do DECISIONS.md).
     declared_used_by = {}  # (doc, anchor) -> lista declarada no frontmatter
     for doc, entry in notes.items():
         for anchor in entry["anchors"]:
@@ -162,8 +158,6 @@ def main():
             if (root / stale).is_file():
                 errors.append(f"{doc}:1: used_by lista {stale}, mas ele nao referencia #{anchor}")
 
-    # notas orfas: nenhuma ancora da nota tem ref WHY: apontando pra ela.
-    # Aviso por padrao; erro so com --strict (ver docstring e DECISIONS.md).
     orphan_warnings = []
     for doc, entry in notes.items():
         if not entry["anchors"]:
