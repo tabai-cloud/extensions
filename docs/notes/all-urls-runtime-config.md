@@ -2,6 +2,7 @@
 title: "<all_urls> instead of a fixed host list"
 used_by:
   - packages/claude-tracker/wxt.config.ts
+  - packages/gpt-tracker/wxt.config.ts
 sidebar:
   badge: { text: extensions, variant: note }
 ---
@@ -19,3 +20,11 @@ that address changes shape (a different Service name, a different
 cluster). Force-installed via policy, never distributed through a Web
 Store, so there's no store review or interactive consent prompt a broad
 grant here would complicate.
+
+### packages/gpt-tracker/wxt.config.ts
+
+`<all_urls>` for the same reason as claude-tracker: the operator's own
+API base URL is runtime config (pushed via `chrome.storage.managed` at
+pod-start), not a manifest-time constant. This also covers
+chatgpt.com/chat.openai.com for the content scripts' own network access
+needs.

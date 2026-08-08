@@ -2,6 +2,7 @@
 title: chrome.webRequest never exposes response bodies
 used_by:
   - packages/gpt-tracker/entrypoints/gpt-signal.content.ts
+  - packages/gpt-tracker/wxt.config.ts
 sidebar:
   badge: { text: extensions, variant: note }
 ---
@@ -19,3 +20,11 @@ scripts have no `chrome.*` APIs at all, so the only way out is
 `gpt-relay.content.ts`) sharing this same page's `window`. Ported from
 this repo's original `contents/chatgpt-usage.ts`, minus its popup-facing
 extras.
+
+### packages/gpt-tracker/wxt.config.ts
+
+No `"webRequest"` permission: message-send detection happens by wrapping
+`window.fetch` in a MAIN-world content script, not `chrome.webRequest` —
+chatgpt.com's usage signals live in RESPONSE bodies, which webRequest can
+never expose, only request metadata. No `"cookies"` either: unlike
+Claude's background worker, nothing here needs an org-ID lookup.
