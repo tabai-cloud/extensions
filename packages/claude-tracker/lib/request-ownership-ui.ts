@@ -2,16 +2,20 @@
 const PROCESSED_ATTR = "data-tabai-ownership-processed"
 
 // WHY: docs/notes/ownership-request-button-scope.md#ownership-request-button-scope — a cowork session (what the "Claude for Chrome" side panel actually creates) is a separate resource type on the operator/Convex side, never a chat under another name; both list in the same two surfaces with the same markup, differing only in these two strings.
+// hrefSegment is spelled out rather than derived from resourceType: the two
+// happen to match today, but one is claude.ai's URL and the other is the
+// ownership type Convex stores, and a future type where they differ must not
+// silently fall out of TARGET_ANCHOR_SELECTOR while still matching hrefPattern.
 const RESOURCE_KINDS = [
-  { resourceType: "chat", rowKeyPrefix: "chat:", hrefPattern: /\/chat\/([^/?#]+)/ },
-  { resourceType: "cowork", rowKeyPrefix: "cowork:", hrefPattern: /\/cowork\/([^/?#]+)/ }
+  { resourceType: "chat", rowKeyPrefix: "chat:", hrefSegment: "chat", hrefPattern: /\/chat\/([^/?#]+)/ },
+  { resourceType: "cowork", rowKeyPrefix: "cowork:", hrefSegment: "cowork", hrefPattern: /\/cowork\/([^/?#]+)/ }
 ] as const
 
 export type OwnershipResourceType = (typeof RESOURCE_KINDS)[number]["resourceType"]
 
 export const OWNERSHIP_RESOURCE_TYPES: readonly OwnershipResourceType[] = RESOURCE_KINDS.map((k) => k.resourceType)
 
-export const TARGET_ANCHOR_SELECTOR = RESOURCE_KINDS.map((k) => `a[href*="/${k.resourceType}/"]`).join(", ")
+export const TARGET_ANCHOR_SELECTOR = RESOURCE_KINDS.map((k) => `a[href*="/${k.hrefSegment}/"]`).join(", ")
 
 export interface OwnershipResource {
   resourceType: OwnershipResourceType
