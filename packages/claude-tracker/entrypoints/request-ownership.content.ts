@@ -11,27 +11,41 @@ import {
   findSidebarTargets,
   injectElement,
   isOwnershipBadge,
+  OWNERSHIP_RESOURCE_TYPES,
+  type OwnershipResource,
+  type OwnershipResourceType,
   type OwnershipTarget
 } from "../lib/request-ownership-ui"
 
-// WHY: docs/notes/ownership-request-button-scope.md#ownership-request-button-scope — retrocompatibility path for chats the sidecar's auto-claim flow never covered (pre-existing chats, or chats created via the "Claude for Chrome" sidebar).
+// WHY: docs/notes/ownership-request-button-scope.md#ownership-request-button-scope — retrocompatibility path for resources the sidecar's auto-claim flow never covered (pre-existing chats and cowork sessions, or chats created via the "Claude for Chrome" sidebar).
 const SOURCE = "claude"
-const RESOURCE_TYPE = "chat"
 
 // WHY: docs/notes/ownership-refresh-cadence.md#ownership-refresh-cadence — loosely matches the operator's own 45-75s resync cadence; refreshing faster just adds load for no fresher an answer.
 const OWNED_IDS_REFRESH_MS = 90_000
 
 // WHY: docs/notes/ownership-request-idempotent.md#ownership-request-idempotent — never mutated directly by a click; a successful request only creates a pending Convex row, so a clicked button stays "Solicitado" until a later refresh observes the grant.
-const ownedIds = new Set<string>()
+// WHY: docs/notes/ownership-per-resource-type-sets.md#ownership-per-resource-type-sets — one set per resource type, never one flat set: the operator answers per (source, type), and two types don't share an id namespace.
+const ownedIdsByType = new Map<OwnershipResourceType, Set<string>>(
+  OWNERSHIP_RESOURCE_TYPES.map((resourceType) => [resourceType, new Set<string>()])
+)
 // WHY: docs/notes/ownership-injected-slots-tracking.md#ownership-injected-slots-tracking — separate from each surface's own processed-row marking; lets reconcileOwnership upgrade a slot in place without re-running either surface's DOM query.
-const injectedSlots = new Map<string, HTMLElement>()
+const injectedSlots = new Map<string, { element: HTMLElement; resource: OwnershipResource }>()
 
-function requestOwnership(resourceId: string): Promise<boolean> {
+// WHY: docs/notes/ownership-per-resource-type-sets.md#ownership-per-resource-type-sets — slots are keyed by type AND id for the same reason the sets are separate.
+function slotKey(resource: OwnershipResource): string {
+  return `${resource.resourceType}:${resource.resourceId}`
+}
+
+function isOwned(resource: OwnershipResource): boolean {
+  return ownedIdsByType.get(resource.resourceType)?.has(resource.resourceId) ?? false
+}
+
+function requestOwnership(resource: OwnershipResource): Promise<boolean> {
   const message: RequestOwnershipMessage = {
     type: "requestOwnership",
     source: SOURCE,
-    resourceType: RESOURCE_TYPE,
-    resourceId
+    resourceType: resource.resourceType,
+    resourceId: resource.resourceId
   }
   return chrome.runtime
     .sendMessage<RequestOwnershipMessage, RequestOwnershipResponse>(message)
@@ -42,8 +56,8 @@ function requestOwnership(resourceId: string): Promise<boolean> {
     })
 }
 
-function listOwnership(): Promise<string[] | null> {
-  const message: ListOwnershipMessage = { type: "listOwnership", source: SOURCE, resourceType: RESOURCE_TYPE }
+function listOwnership(resourceType: OwnershipResourceType): Promise<string[] | null> {
+  const message: ListOwnershipMessage = { type: "listOwnership", source: SOURCE, resourceType }
   return chrome.runtime
     .sendMessage<ListOwnershipMessage, ListOwnershipResponse>(message)
     .then((response) => response?.resourceIds ?? null)
@@ -54,36 +68,40 @@ function listOwnership(): Promise<string[] | null> {
 }
 
 function elementFor(target: OwnershipTarget): HTMLElement {
-  return ownedIds.has(target.resourceId)
-    ? createOwnershipBadge()
-    : createRequestOwnershipButton(target.resourceId, requestOwnership)
+  return isOwned(target) ? createOwnershipBadge() : createRequestOwnershipButton(target, requestOwnership)
 }
 
 function injectTargets(targets: OwnershipTarget[]): void {
   for (const target of targets) {
     const element = elementFor(target)
     injectElement(target, element)
-    injectedSlots.set(target.resourceId, element)
+    injectedSlots.set(slotKey(target), { element, resource: target })
   }
 }
 
 // WHY: docs/notes/ownership-badge-one-way-upgrade.md#ownership-badge-one-way-upgrade — only ever upgrades button -> badge; nothing in this extension's own flow revokes access mid-session.
 function reconcileOwnership(): void {
-  for (const [resourceId, element] of injectedSlots) {
-    if (!ownedIds.has(resourceId) || isOwnershipBadge(element)) continue
+  for (const [key, slot] of injectedSlots) {
+    if (!isOwned(slot.resource) || isOwnershipBadge(slot.element)) continue
     const badge = createOwnershipBadge()
-    element.replaceWith(badge)
-    injectedSlots.set(resourceId, badge)
+    slot.element.replaceWith(badge)
+    injectedSlots.set(key, { element: badge, resource: slot.resource })
   }
 }
 
 async function refreshOwnedIds(): Promise<void> {
-  const resourceIds = await listOwnership()
-  // null means the call failed/isn't configured — leave the previous snapshot
-  // untouched, same convention @ai-cloud-tracker/shared's listOwnership documents.
-  if (!resourceIds) return
-  ownedIds.clear()
-  for (const id of resourceIds) ownedIds.add(id)
+  // Each type is refreshed independently: one type's failed call must not wipe
+  // out another's good snapshot.
+  for (const resourceType of OWNERSHIP_RESOURCE_TYPES) {
+    const resourceIds = await listOwnership(resourceType)
+    // null means the call failed/isn't configured — leave the previous snapshot
+    // untouched, same convention @ai-cloud-tracker/shared's listOwnership documents.
+    if (!resourceIds) continue
+    const owned = ownedIdsByType.get(resourceType)
+    if (!owned) continue
+    owned.clear()
+    for (const id of resourceIds) owned.add(id)
+  }
   reconcileOwnership()
 }
 

@@ -1,23 +1,51 @@
 // WHY: docs/notes/claude-dom-mount-surfaces.md#claude-dom-mount-surfaces — the sidebar and /chats page render the same chat list with genuinely different markup, confirmed live; each surface's own DOM quirks stay self-contained behind a `mount` callback.
 const PROCESSED_ATTR = "data-tabai-ownership-processed"
-const CHAT_HREF_PATTERN = /\/chat\/([^/?#]+)/
-const ROW_KEY_CHAT_PREFIX = "chat:"
 
-export interface OwnershipTarget {
+// WHY: docs/notes/ownership-request-button-scope.md#ownership-request-button-scope — a cowork session (what the "Claude for Chrome" side panel actually creates) is a separate resource type on the operator/Convex side, never a chat under another name; both list in the same two surfaces with the same markup, differing only in these two strings.
+// hrefSegment is spelled out rather than derived from resourceType: the two
+// happen to match today, but one is claude.ai's URL and the other is the
+// ownership type Convex stores, and a future type where they differ must not
+// silently fall out of TARGET_ANCHOR_SELECTOR while still matching hrefPattern.
+const RESOURCE_KINDS = [
+  { resourceType: "chat", rowKeyPrefix: "chat:", hrefSegment: "chat", hrefPattern: /\/chat\/([^/?#]+)/ },
+  { resourceType: "cowork", rowKeyPrefix: "cowork:", hrefSegment: "cowork", hrefPattern: /\/cowork\/([^/?#]+)/ }
+] as const
+
+export type OwnershipResourceType = (typeof RESOURCE_KINDS)[number]["resourceType"]
+
+export const OWNERSHIP_RESOURCE_TYPES: readonly OwnershipResourceType[] = RESOURCE_KINDS.map((k) => k.resourceType)
+
+export const TARGET_ANCHOR_SELECTOR = RESOURCE_KINDS.map((k) => `a[href*="/${k.hrefSegment}/"]`).join(", ")
+
+export interface OwnershipResource {
+  resourceType: OwnershipResourceType
   resourceId: string
+}
+
+export interface OwnershipTarget extends OwnershipResource {
   mount: (element: HTMLElement) => void
 }
 
-function resourceIdFromAnchor(anchor: Element | null): string | null {
+function resourceFromAnchor(anchor: Element | null): OwnershipResource | null {
   const href = anchor?.getAttribute("href")
   if (!href) return null
-  return CHAT_HREF_PATTERN.exec(href)?.[1] ?? null
+  for (const kind of RESOURCE_KINDS) {
+    const resourceId = kind.hrefPattern.exec(href)?.[1]
+    if (resourceId) return { resourceType: kind.resourceType, resourceId }
+  }
+  return null
 }
 
-// WHY: docs/notes/claude-dom-mount-surfaces.md#claude-dom-mount-surfaces — strips the "chat:" prefix; the operator/Convex side stores the bare conversation id, not this UI-only keying scheme.
-function chatIdFromRowKey(rowKey: string | null): string | null {
-  if (!rowKey || !rowKey.startsWith(ROW_KEY_CHAT_PREFIX)) return null
-  return rowKey.slice(ROW_KEY_CHAT_PREFIX.length)
+// WHY: docs/notes/claude-dom-mount-surfaces.md#claude-dom-mount-surfaces — strips the "chat:"/"cowork:" prefix; the operator/Convex side stores the bare id under a separate `type` field, not this UI-only keying scheme.
+function resourceFromRowKey(rowKey: string | null): OwnershipResource | null {
+  if (!rowKey) return null
+  for (const kind of RESOURCE_KINDS) {
+    if (rowKey.startsWith(kind.rowKeyPrefix)) {
+      const resourceId = rowKey.slice(kind.rowKeyPrefix.length)
+      return resourceId ? { resourceType: kind.resourceType, resourceId } : null
+    }
+  }
+  return null
 }
 
 // WHY: docs/notes/claude-dom-mount-surfaces.md#claude-dom-mount-surfaces — rows without a resolvable chat id are left unmarked (not skipped-once) so a later scan can retry a transient failure; falls back to a defensive pre-fix mount shape.
@@ -28,9 +56,9 @@ export function findSidebarTargets(root: ParentNode): OwnershipTarget[] {
     const mainButton = row.querySelector("[data-row-main-button]")
     if (!mainButton) continue
     const rowKey = row.closest("[data-row-key]")?.getAttribute("data-row-key") ?? null
-    const resourceId = chatIdFromRowKey(rowKey) ?? resourceIdFromAnchor(mainButton)
+    const resource = resourceFromRowKey(rowKey) ?? resourceFromAnchor(mainButton)
     const moreOptionsButton = row.querySelector<HTMLElement>("[data-row-action]")
-    if (!resourceId || !moreOptionsButton) continue
+    if (!resource || !moreOptionsButton) continue
 
     const mount =
       mainButton instanceof HTMLElement
@@ -38,7 +66,7 @@ export function findSidebarTargets(root: ParentNode): OwnershipTarget[] {
         : (element: HTMLElement) => moreOptionsButton.before(element)
 
     row.setAttribute(PROCESSED_ATTR, "1")
-    targets.push({ resourceId, mount })
+    targets.push({ ...resource, mount })
   }
   return targets
 }
@@ -48,10 +76,10 @@ export function findChatsTableTargets(root: ParentNode): OwnershipTarget[] {
   const targets: OwnershipTarget[] = []
   const rows = root.querySelectorAll<HTMLElement>(`table[data-cds="Table"] tr[data-hoverable]:not([${PROCESSED_ATTR}])`)
   for (const row of rows) {
-    const anchor = row.querySelector('a[href*="/chat/"]')
-    const resourceId = resourceIdFromAnchor(anchor)
+    const anchor = row.querySelector(TARGET_ANCHOR_SELECTOR)
+    const resource = resourceFromAnchor(anchor)
     const moreOptionsButton = row.querySelector<HTMLElement>('button[aria-haspopup="menu"]')
-    if (!resourceId || !moreOptionsButton) continue
+    if (!resource || !moreOptionsButton) continue
 
     const titleFlexRow = anchor?.nextElementSibling?.firstElementChild
     const mount =
@@ -60,12 +88,12 @@ export function findChatsTableTargets(root: ParentNode): OwnershipTarget[] {
         : (element: HTMLElement) => moreOptionsButton.before(element)
 
     row.setAttribute(PROCESSED_ATTR, "1")
-    targets.push({ resourceId, mount })
+    targets.push({ ...resource, mount })
   }
   return targets
 }
 
-export type RequestOwnershipHandler = (resourceId: string) => Promise<boolean>
+export type RequestOwnershipHandler = (resource: OwnershipResource) => Promise<boolean>
 
 const LABEL_IDLE = "Solicitar acesso"
 const LABEL_PENDING = "Solicitando…"
@@ -193,7 +221,10 @@ function setButtonState(button: HTMLButtonElement, label: HTMLSpanElement, text:
 }
 
 // WHY: docs/notes/ownership-request-idempotent.md#ownership-request-idempotent — no shared/global state, no pre-check against Convex; duplicate requests are silently deduped server-side, so an optimistic per-click button is enough.
-export function createRequestOwnershipButton(resourceId: string, onRequest: RequestOwnershipHandler): HTMLButtonElement {
+export function createRequestOwnershipButton(
+  resource: OwnershipResource,
+  onRequest: RequestOwnershipHandler
+): HTMLButtonElement {
   ensureStylesInjected()
   const button = document.createElement("button")
   button.type = "button"
@@ -210,7 +241,7 @@ export function createRequestOwnershipButton(resourceId: string, onRequest: Requ
 
     button.disabled = true
     setButtonState(button, label, LABEL_PENDING, true)
-    onRequest(resourceId)
+    onRequest(resource)
       .then((ok) => {
         setButtonState(button, label, ok ? LABEL_DONE : LABEL_ERROR, true)
         button.disabled = ok

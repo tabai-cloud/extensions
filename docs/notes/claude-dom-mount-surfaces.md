@@ -55,13 +55,24 @@ Both adapters return a `mount` callback (not a fixed insertion element)
 so each surface's own DOM quirks stay fully self-contained here —
 `request-ownership.content.ts` just calls `target.mount(element)`.
 
-### packages/claude-tracker/lib/request-ownership-ui.ts — chatIdFromRowKey
+### packages/claude-tracker/lib/request-ownership-ui.ts — resourceFromRowKey
 
-Strips the `"chat:"` prefix a sidebar row's `data-row-key` carries — the
-operator/Convex side stores/looks up the bare conversation id (see
-ai-cloud-agent's own registration calls), not this UI-only keying scheme.
-Returns `null` for a present-but-non-chat key (e.g. a `"project:"` row)
-so callers skip it same as a missing key entirely.
+Strips the `"chat:"`/`"cowork:"` prefix a sidebar row's `data-row-key`
+carries — the operator/Convex side stores/looks up the bare id under a
+separate `type` field (see ai-cloud-agent's own registration calls), not this
+UI-only keying scheme. Returns `null` for a present-but-unrecognized key (e.g.
+a `"project:"` or `"section:"` row) so callers skip it same as a missing key
+entirely; the prefix is also what tells the two ownable types apart, so it is
+read in preference to the href.
+
+**Both surfaces list cowork sessions alongside chats**, in exactly the same
+markup — confirmed live on 2026-08-15 against a real logged-in session, not
+assumed: sidebar rows carry `data-row-key="cowork:cse_…"` with an
+`<a data-row-main-button href="/cowork/cse_…">`, and `/recents` table rows
+carry the same `<a href="/cowork/cse_…">` in the title cell with the same
+`nextElementSibling.firstElementChild` flex row to mount into. So neither
+adapter needed a new mount strategy — only a wider notion of which hrefs and
+row-key prefixes resolve to an ownable resource.
 
 ### packages/claude-tracker/lib/request-ownership-ui.ts — findSidebarTargets
 
