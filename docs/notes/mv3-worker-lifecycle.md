@@ -23,7 +23,9 @@ real gap.
 The periodic heartbeat is the only thing this background entrypoint does
 now — no webRequest listener at all. `chrome.alarms` is the MV3-correct
 way to get a guaranteed wake-up point; `setInterval` doesn't survive
-worker suspension.
+worker suspension. Arming it is not unconditional, though — see
+[heartbeat-alarm-create-resets-schedule](heartbeat-alarm-create-resets-schedule.md)
+for why re-creating it on every wake stopped it firing entirely.
 
 ### packages/claude-tracker/entrypoints/background.ts — config warm-up
 

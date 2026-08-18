@@ -49,6 +49,21 @@ async function discoverOrgId(): Promise<string | null> {
   return null
 }
 
+// WHY: docs/notes/heartbeat-alarm-create-resets-schedule.md#heartbeat-alarm-create-resets-schedule — create() does NOT leave an existing alarm alone: it cancels and replaces it, restarting the countdown. This runs on every service-worker wake, and request-ownership.content.ts wakes the worker every OWNED_IDS_REFRESH_MS (90s), so an unconditional create() reset the 15-minute schedule ~10x per period and the heartbeat never fired at all while a claude.ai tab was open.
+async function ensureHeartbeatAlarm(): Promise<void> {
+  try {
+    if (await chrome.alarms.get(HEARTBEAT_ALARM_NAME)) return
+  } catch (err) {
+    // The promise form of alarms.get needs Chrome 111+. On anything older it
+    // throws, and swallowing that here would leave NO alarm at all — strictly
+    // worse than the reset bug. Falling through to create() degrades to the
+    // old behaviour instead, which at least still fires when nothing wakes
+    // the worker.
+    console.error("[claude-tracker] alarms.get unavailable, falling back to create", err)
+  }
+  await chrome.alarms.create(HEARTBEAT_ALARM_NAME, { periodInMinutes: HEARTBEAT_PERIOD_MINUTES })
+}
+
 export default defineBackground(() => {
   // WHY: docs/notes/mv3-worker-lifecycle.md#mv3-worker-lifecycle — chrome.alarms is the only correct way to get a guaranteed wake-up in MV3; setInterval doesn't survive worker suspension.
   chrome.alarms.onAlarm.addListener((alarm) => {
@@ -57,9 +72,7 @@ export default defineBackground(() => {
       .then((orgId) => (orgId ? reportUsage(orgId) : undefined))
       .catch((err) => console.error("[claude-tracker] heartbeat error", err))
   })
-  // create() is idempotent for an existing alarm of the same name (just
-  // resets its schedule), so calling this on every wake is safe.
-  chrome.alarms.create(HEARTBEAT_ALARM_NAME, { periodInMinutes: HEARTBEAT_PERIOD_MINUTES })
+  ensureHeartbeatAlarm().catch((err) => console.error("[claude-tracker] ensureHeartbeatAlarm error", err))
 
   // WHY: docs/notes/mv3-worker-lifecycle.md#mv3-worker-lifecycle — config cache is warmed at worker startup rather than waiting for the first alarm tick.
   loadConfig().catch((err) => console.error("[claude-tracker] loadConfig error", err))
